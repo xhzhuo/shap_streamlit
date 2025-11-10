@@ -612,4 +612,4 @@ elif page == "反推/预算优化":
     page_reverse_opt(state)
 
 st.markdown("---")
-st.markdown('<div class="small">版本：DataTech UI · v5 • 最终版（简洁特征选择 + 完整反推）</div>', unsafe_allow_html=True)
+st.markdown('<div class="small">版本：DataTech UI </div>', unsafe_allow_html=True)
