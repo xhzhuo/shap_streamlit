@@ -1,4 +1,4 @@
-# adv_shap_dashboard_datatech_v5.py
+# adv_shap_dashboard_datatech_v2_full.py
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 # 页面配置 & 视觉样式
 # ---------------------------
 st.set_page_config(
-    page_title="Ad Effect Intelligence — DataTech UI v5",
+    page_title="Ad Effect Intelligence — DataTech UI v2 (Full)",
     page_icon="🛰️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -37,6 +37,7 @@ st.markdown(
     .brand { font-size:1.4rem; font-weight:700; color: var(--accent); }
     .subtitle { color: var(--muted); font-size:0.95rem }
     .small { font-size:0.85rem; color:var(--muted); }
+    .card { background: rgba(255,255,255,0.02); padding: 12px; border-radius: 8px; }
     </style>
     """,
     unsafe_allow_html=True
@@ -88,14 +89,20 @@ def metrics_for_model(model, X_train, X_test, y_train, y_test):
     test_r2 = r2_score(y_test, y_test_pred)
     train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
     test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
-    cv_scores = cross_val_score(model, X_train, y_train, cv=4, scoring='r2')
+    try:
+        cv_scores = cross_val_score(model, X_train, y_train, cv=4, scoring='r2')
+        cv_mean = float(np.mean(cv_scores))
+        cv_std = float(np.std(cv_scores))
+    except Exception:
+        cv_mean = np.nan
+        cv_std = np.nan
     return {
         "train_r2": float(train_r2),
         "test_r2": float(test_r2),
         "train_rmse": float(train_rmse),
         "test_rmse": float(test_rmse),
-        "cv_mean": float(np.mean(cv_scores)),
-        "cv_std": float(np.std(cv_scores))
+        "cv_mean": cv_mean,
+        "cv_std": cv_std
     }
 
 def shap_values_from_model(model, X_background, X_explain):
@@ -105,7 +112,7 @@ def shap_values_from_model(model, X_background, X_explain):
 
 def safe_format(val, fmt=".3f"):
     try:
-        if val is None:
+        if val is None or (isinstance(val, float) and np.isnan(val)):
             return "—"
         v = float(val)
         return format(v, fmt)
@@ -120,7 +127,7 @@ def format_dataframe_numeric(df):
     return fmt
 
 # ---------------------------
-# 反推/优化工具（完整恢复）
+# 反推/优化工具（来自原版，保留完整逻辑）
 # ---------------------------
 def _get_bounds(base_x, min_constraints, max_constraints, X_train_max):
     bounds = []
@@ -263,11 +270,56 @@ def _fully_constrained_optimization(model, base_x, y_base, y_target, total_budge
         return _budget_constrained_optimization(model, base_x, y_base, y_target, total_budget, weights, sensitivities, min_constraints, max_constraints, X_train_max)
 
 # ---------------------------
-# 侧栏 & 导航（保留随机种子）
+# 模型评分函数（你提供的）
+# ---------------------------
+def evaluate_model_quality(train_r2, test_r2, cv_mean, train_rmse=None, test_rmse=None):
+    """
+    评估模型质量 - 广告渠道投放分析专用
+    输出简易评分和实用建议
+    """
+    # 关键指标
+    r2_gap = abs(train_r2 - test_r2)  # 训练测试差异
+
+    # 综合评分（更简化的权重）
+    score = (
+        test_r2 * 0.7 +           # 测试集表现最重要
+        cv_mean * 0.2 +           # 稳定性
+        (1 - min(r2_gap, 0.4)) * 0.1  # 一致性
+    ) * 100
+    score = max(0, min(round(score, 1), 100))
+
+    # 质量等级与建议
+    if score >= 85:
+        level, color, icon = "优秀", "#22c55e", "✅"
+        advice = "模型可靠，可直接用于渠道效果预测"
+    elif score >= 70:
+        level, color, icon = "良好", "#facc15", "👍" 
+        advice = "模型可用，建议监控实际效果"
+    elif score >= 55:
+        level, color, icon = "一般", "#f97316", "⚠️"
+        advice = "模型需优化，谨慎用于决策"
+    else:
+        level, color, icon = "需改进", "#ef4444", "❌"
+        advice = "模型不可靠，建议重新构建"
+
+    # 误差检查提示
+    error_note = ""
+    if train_rmse and test_rmse and test_rmse > train_rmse * 1.5:
+        error_note = "（模型可能存在过拟合）"
+
+    return {
+        "score": score,
+        "level": level,
+        "color": color,
+        "summary": f"{icon} 模型评分：{score}分 - {level}\n💡 {advice}{error_note}"
+    }
+
+# ---------------------------
+# 页面：侧栏导航（已去除随机控件）
 # ---------------------------
 with st.sidebar:
     st.markdown('<div class="brand">Ad Effect Intelligence</div>', unsafe_allow_html=True)
-    st.markdown('<div class="subtitle">DataTech UI · v5</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subtitle">DataTech UI · Full</div>', unsafe_allow_html=True)
     st.markdown("---")
     page = st.radio(
         "导航",
@@ -275,7 +327,7 @@ with st.sidebar:
         index=0
     )
     st.markdown("---")
-    st.number_input("随机种子 (random_state)", value=42, key="seed")
+    st.caption("© DataTech · Smart Ad Analysis")
 
 # ---------------------------
 # 页面：数据上传 & 预览
@@ -301,7 +353,7 @@ def page_data_upload(state):
         st.write(", ".join(num_cols[:30]) + ("..." if len(num_cols)>30 else ""))
 
 # ---------------------------
-# 页面：模型训练 & 评估（使用 st.multiselect 选择特征）
+# 页面：模型训练 & 评估（使用 st.multiselect 选择特征） + 模型评分卡
 # ---------------------------
 def page_train_and_eval(state):
     st.header("⚙️ 模型训练与评估")
@@ -327,7 +379,8 @@ def page_train_and_eval(state):
     )
     st.markdown(f"已选特征： **{len(selected_features)}** 个")
 
-    n_est = st.slider("🌲 随机森林树数量 (n_estimators)", 50, 800, 200, step=50)
+    st.markdown("---")
+    st.markdown("### 模型训练")
     run = st.button("🚀 训练模型")
 
     if run:
@@ -336,7 +389,8 @@ def page_train_and_eval(state):
             return
         with st.spinner("模型训练中..."):
             try:
-                model, X_train, X_test, y_train, y_test = train_model(df, selected_features, target, n_est, st.session_state.seed)
+                # 固定参数：n_estimators=200, random_state=42
+                model, X_train, X_test, y_train, y_test = train_model(df, selected_features, target, n_estimators=200, random_state=42)
                 metrics = metrics_for_model(model, X_train, X_test, y_train, y_test)
                 state.update({
                     "model": model, "metrics": metrics,
@@ -356,6 +410,55 @@ def page_train_and_eval(state):
         c3.metric("训练 RMSE", safe_format(m.get('train_rmse'), ".2f"))
         c4.metric("测试 RMSE", safe_format(m.get('test_rmse'), ".2f"))
         st.caption(f"交叉验证 R²: {safe_format(m.get('cv_mean'), '.3f')} ± {safe_format(m.get('cv_std'), '.3f')}")
+
+        # --- 模型评分卡 ---
+        quality = evaluate_model_quality(
+            m['train_r2'], m['test_r2'], m['cv_mean'],
+            m['train_rmse'], m['test_rmse']
+        )
+
+        # 安全地分割字符串，避免索引越界
+        summary_parts = quality['summary'].split('\n')
+        summary_title = summary_parts[0] if len(summary_parts) > 0 else quality['summary']
+        summary_advice = summary_parts[1] if len(summary_parts) > 1 else ""
+
+        st.markdown(f"""
+            <div style="
+                background:#ffffff;
+                color:#333333;
+                border:1px solid #e0e0e0;
+                border-left:6px solid {quality['color']};
+                border-radius:8px;
+                padding:18px 22px;
+                margin-top:20px;
+                font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
+                box-shadow:0 2px 8px rgba(0,0,0,0.05);
+            ">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                <div style="font-size:18px;font-weight:600;color:{quality['color']};">
+                    {summary_title}
+                </div>
+                <div style="font-size:14px;margin-top:4px;color:#555;">
+                    {summary_advice}
+                </div>
+                </div>
+                <div style="text-align:right;">
+                <div style="font-size:28px;font-weight:700;color:{quality['color']};line-height:1;">
+                    {quality['score']}
+                </div>
+                <div style="font-size:13px;color:#777;">模型评分</div>
+                </div>
+            </div>
+            <hr style="border:none;border-top:1px solid #eee;margin:12px 0;">
+            <div style="font-size:13.5px;color:#555;line-height:1.6;">
+                <b>📘 指标说明：</b><br>
+                • R²（决定系数）：越接近 1，拟合效果越好。<br>
+                • RMSE（均方根误差）：越小越好，表示预测值与真实值越接近。<br>
+                • 交叉验证 R²：越接近测试集 R²，说明模型稳定且能适应新数据。
+            </div>
+            </div>
+            """, unsafe_allow_html=True)
 
 # ---------------------------
 # 页面：可视化分析（SHAP Summary + 饼图 + 热力图）
@@ -380,9 +483,9 @@ def page_visual_analysis(state):
                 return
 
     shap_vals = np.array(state['shap_values'])
-    tab1, tab2, tab3 = st.tabs(["SHAP Summary（交互）", "特征贡献（饼图）", "相关性热力图"])
+    tab1, tab2, tab3 = st.tabs(["SHAP Summary", "特征贡献（饼图）", "相关性热力图"])
 
-    # --- SHAP Summary 修复版 ---
+    # --- SHAP Summary ---
     with tab1:
         st.markdown("#### SHAP Summary（特征按重要度降序显示）")
         try:
@@ -393,7 +496,6 @@ def page_visual_analysis(state):
                 n_samples = X_test.shape[0]
                 n_features = len(features)
 
-                # 规范化 SHAP 值
                 def normalize_shap(raw, n_samples, n_features):
                     arr = np.array(raw)
                     if arr.ndim == 3:
@@ -407,15 +509,12 @@ def page_visual_analysis(state):
                     raise ValueError(f"不支持的 SHAP 形状: {arr.shape}")
 
                 shap_arr = normalize_shap(raw_shap, n_samples, n_features)
-
-                # 排序特征（按平均绝对值降序）
                 abs_mean = np.abs(shap_arr).mean(axis=0)
-                sorted_idx = np.argsort(abs_mean)[::-1]  # 降序排列
+                sorted_idx = np.argsort(abs_mean)[::-1]
                 shap_sorted = shap_arr[:, sorted_idx]
                 X_sorted = pd.DataFrame(X_test, columns=features).iloc[:, sorted_idx]
                 sorted_features = [features[i] for i in sorted_idx]
 
-                # 构造 long-form dataframe
                 long_data = []
                 for i, feat in enumerate(sorted_features):
                     for j in range(len(X_sorted)):
@@ -426,13 +525,12 @@ def page_visual_analysis(state):
                         })
                 df_long = pd.DataFrame(long_data)
 
-                # 绘图
                 fig = px.scatter(
                     df_long,
                     x="SHAP value",
                     y="Feature",
                     color="Feature value",
-                    category_orders={"Feature": sorted_features[::-1]},  # 保持顺序，贡献度高的在上方
+                    category_orders={"Feature": sorted_features[::-1]},
                     color_continuous_scale="RdBu_r",
                     opacity=0.6,
                     render_mode="webgl",
@@ -441,7 +539,7 @@ def page_visual_analysis(state):
                 )
                 fig.update_traces(marker=dict(size=5))
                 fig.update_layout(
-                    yaxis=dict(title="特征", showline=True, showgrid=True, zeroline=False, autorange='reversed'),  # 关键改动
+                    yaxis=dict(title="特征", showline=True, showgrid=True, zeroline=False, autorange='reversed'),
                     xaxis=dict(title="SHAP value", showline=True, showgrid=True, zeroline=True),
                     plot_bgcolor="rgba(0,0,0,0)",
                     paper_bgcolor="rgba(0,0,0,0)",
@@ -449,10 +547,8 @@ def page_visual_analysis(state):
                     coloraxis_colorbar=dict(title="特征值")
                 )
                 st.plotly_chart(fig, width="stretch")
-
         except Exception as e:
             st.error(f"绘制 SHAP Summary 失败: {e}")
-
 
     # --- 饼图 ---
     with tab2:
@@ -489,7 +585,6 @@ def page_visual_analysis(state):
                 font=dict(color="#E6F0F8")
             )
             st.plotly_chart(pie_fig, width="stretch")
-
         except Exception as e:
             st.error(f"饼图绘制失败: {e}")
 
@@ -498,7 +593,9 @@ def page_visual_analysis(state):
         try:
             all_cols = features + [state['model_target']]
             corr = state['df'][all_cols].corr()
-            hm = px.imshow(corr, text_auto=".2f", aspect="auto", title="相关性矩阵")
+            mask = np.triu(np.ones_like(corr, dtype=bool))
+            corr_masked = corr.where(~mask)
+            hm = px.imshow(corr_masked, text_auto=".2f", aspect="auto", title="相关性矩阵（下半部分）")
             hm.update_layout(
                 plot_bgcolor="rgba(0,0,0,0)",
                 paper_bgcolor="rgba(0,0,0,0)",
@@ -509,7 +606,7 @@ def page_visual_analysis(state):
             st.error(f"热力图绘制失败: {e}")
 
 # ---------------------------
-# 页面：反推 / 预算优化（完整版保留）
+# 页面：反推 / 预算优化（完整版）
 # ---------------------------
 def page_reverse_opt(state):
     st.header("🔁 反推与预算优化（完整版）")
@@ -528,7 +625,7 @@ def page_reverse_opt(state):
     st.markdown(f"基准预测 {state.get('model_target','目标')}: **{safe_format(y_base, '.2f')}**")
     col1, col2 = st.columns(2)
     with col1:
-        target_gmv = st.number_input("目标 GMV", value=float(y_base * 1.1), step=1.0)
+        target_gmv = st.number_input(f"目标 {state.get('model_target','目标')}", value=float(y_base * 1.1), step=1.0)
     with col2:
         method = st.selectbox("优化方法", ["线性分配", "预算约束优化", "全约束优化"])
     use_budget = st.checkbox("启用总预算约束", value=False)
@@ -612,4 +709,4 @@ elif page == "反推/预算优化":
     page_reverse_opt(state)
 
 st.markdown("---")
-st.markdown('<div class="small">版本：DataTech UI </div>', unsafe_allow_html=True)
+st.markdown('<div class="small">Version：V2 · Full</div>', unsafe_allow_html=True)
