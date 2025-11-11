@@ -44,6 +44,8 @@ def page_visual_analysis(state):
 
                 def normalize_shap(raw, n_samples, n_features):
                     arr = np.array(raw)
+                    expected_size = n_samples * n_features
+                    
                     if arr.ndim == 3:
                         return np.mean(arr, axis=0)
                     if arr.ndim == 2:
@@ -51,8 +53,17 @@ def page_visual_analysis(state):
                             return arr
                         if arr.shape == (n_features, n_samples):
                             return arr.T
+                        # 当形状不匹配时，尝试基于实际大小进行处理
+                        if arr.size == expected_size:
+                            return arr.reshape((n_samples, n_features))
+                        elif arr.shape[0] == n_samples:
+                            return arr[:, :n_features] if arr.shape[1] >= n_features else np.pad(arr, ((0, 0), (0, n_features - arr.shape[1])), mode='constant')
+                        elif arr.shape[1] == n_features:
+                            return arr[:n_samples, :] if arr.shape[0] >= n_samples else np.pad(arr, ((0, n_samples - arr.shape[0]), (0, 0)), mode='constant')
+                    # 处理一维数组的情况
+                    if arr.ndim == 1 and arr.size == expected_size:
                         return arr.reshape((n_samples, n_features))
-                    raise ValueError(f"不支持的 SHAP 形状: {arr.shape}")
+                    raise ValueError(f"不支持的 SHAP 形状: {arr.shape}, 期望大小: {expected_size}")
 
                 shap_arr = normalize_shap(raw_shap, n_samples, n_features)
                 abs_mean = np.abs(shap_arr).mean(axis=0)
