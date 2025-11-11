@@ -36,14 +36,15 @@ def evaluate_model_quality(train_r2, test_r2, cv_mean, train_rmse=None, test_rms
         level, color, icon = "需改进", "#ef4444", "❌"
         advice = "模型不可靠，建议重新构建"
 
-    # 误差检查提示
-    error_note = ""
-    if train_rmse and test_rmse and test_rmse > train_rmse * 1.5:
-        error_note = "（模型可能存在过拟合）"
+    # # 误差检查提示
+    # error_note = ""
+    # if train_rmse and test_rmse and test_rmse > train_rmse * 1.5:
+    #     error_note = "（模型可能存在过拟合）"
 
     return {
         "score": score,
         "level": level,
         "color": color,
-        "summary": f"{icon} 模型评分：{score}分 - {level}\n💡 {advice}{error_note}"
+        # "summary": f"{icon} 模型评分：{score}分 - {level}\n💡 {advice}{error_note}"
+        "summary": f"{icon} 模型评分：{score}分 - {level}\n💡 {advice}"
     }
