@@ -71,6 +71,11 @@ def metrics_for_model(model, X_train, X_test, y_train, y_test):
     test_r2 = r2_score(y_test, y_test_pred)
     train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
     test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
+    
+    # 计算归一化RMSE
+    train_nrmse = normalized_rmse(y_train, y_train_pred, method='iqr')
+    test_nrmse = normalized_rmse(y_test, y_test_pred, method='iqr')
+    
     try:
         cv_scores = cross_val_score(model, X_train, y_train, cv=4, scoring='r2')
         cv_mean = float(np.mean(cv_scores))
@@ -83,6 +88,8 @@ def metrics_for_model(model, X_train, X_test, y_train, y_test):
         "test_r2": float(test_r2),
         "train_rmse": float(train_rmse),
         "test_rmse": float(test_rmse),
+        "train_nrmse": float(train_nrmse),
+        "test_nrmse": float(test_nrmse),
         "cv_mean": cv_mean,
         "cv_std": cv_std
     }
@@ -113,3 +120,48 @@ def format_dataframe_numeric(df):
         if pd.api.types.is_numeric_dtype(df[c]):
             fmt[c] = "{:.3f}"
     return fmt
+
+
+def normalized_rmse(y_true, y_pred, method='iqr'):
+    """
+    计算归一化的RMSE (Normalized Root Mean Squared Error)
+    
+    Parameters:
+    y_true: array-like, 真实值
+    y_pred: array-like, 预测值
+    method: str, 归一化方法
+        - 'iqr': 使用四分位距 (Interquartile Range)
+        - 'mean': 使用真实值的均值
+        - 'range': 使用真实值的范围 (max - min)
+        - 'std': 使用真实值的标准差
+    
+    Returns:
+    float: 归一化的RMSE值
+    """
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    
+    # 计算RMSE
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+    
+    if method == 'iqr':
+        # 使用四分位距归一化
+        q75, q25 = np.percentile(y_true, [75, 25])
+        normalization_factor = q75 - q25
+    elif method == 'mean':
+        # 使用均值归一化
+        normalization_factor = np.mean(y_true)
+    elif method == 'range':
+        # 使用范围归一化
+        normalization_factor = np.max(y_true) - np.min(y_true)
+    elif method == 'std':
+        # 使用标准差归一化
+        normalization_factor = np.std(y_true)
+    else:
+        raise ValueError("不支持的归一化方法")
+    
+    # 避免除以零
+    if normalization_factor == 0:
+        return np.inf if rmse > 0 else 0
+    
+    return rmse / normalization_factor

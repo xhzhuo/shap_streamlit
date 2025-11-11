@@ -61,8 +61,9 @@ def page_train_and_eval(state):
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("训练 R²", safe_format(m.get('train_r2'), ".3f"))
         c2.metric("测试 R²", safe_format(m.get('test_r2'), ".3f"))
-        c3.metric("训练 RMSE", safe_format(m.get('train_rmse'), ".2f"))
-        c4.metric("测试 RMSE", safe_format(m.get('test_rmse'), ".2f"))
+        c3.metric("训练 NRMSE", safe_format(m.get('train_nrmse'), ".3f"))
+        c4.metric("测试 NRMSE", safe_format(m.get('test_nrmse'), ".3f"))
+        
         st.caption(f"交叉验证 R²: {safe_format(m.get('cv_mean'), '.3f')} ± {safe_format(m.get('cv_std'), '.3f')}")
 
         # --- 模型评分卡 ---
@@ -108,7 +109,7 @@ def page_train_and_eval(state):
             <div style="font-size:13.5px;color:#555;line-height:1.6;">
                 <b>📘 指标说明：</b><br>
                 • R²（决定系数）：越接近 1，拟合效果越好。<br>
-                • RMSE（均方根误差）：越小越好，表示预测值与真实值越接近。<br>
+                • NRMSE（归一化均方根误差）：越小越好，表示预测值与真实值越接近，消除了量纲影响。<br>
                 • 交叉验证 R²：越接近测试集 R²，说明模型稳定且能适应新数据。
             </div>
             </div>
