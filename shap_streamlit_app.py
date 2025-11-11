@@ -26,7 +26,7 @@ from pages_module.dev_docs import page_dev_docs
 # ---------------------------
 with st.sidebar:
     st.markdown('<div class="brand">Ad Effect Intelligence</div>', unsafe_allow_html=True)
-    st.markdown('<div class="subtitle">DataTech UI · Full</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subtitle">DataTech </div>', unsafe_allow_html=True)
     st.markdown("---")
     page = st.radio(
         "导航",
@@ -55,4 +55,4 @@ elif page == "说明文档":
     page_dev_docs()
 
 st.markdown("---")
-st.markdown('<div class="small">Version：V2 · Full</div>', unsafe_allow_html=True)
+st.markdown('<div class="small">Version：Beta</div>', unsafe_allow_html=True)
