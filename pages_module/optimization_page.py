@@ -89,7 +89,7 @@ def page_reverse_opt(state):
                 fig.update_layout(barmode='group', title='基准 vs 建议投放量', plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#E6F0F8"))
                 st.plotly_chart(fig, width="stretch")
                 if y_pred_new is not None:
-                    st.success(f"建议方案预测 GMV: {safe_format(y_pred_new, '.2f')}（目标：{safe_format(target_gmv, '.2f')}）")
+                    st.success(f"建议方案预测 {state.get('model_target','目标')}: {safe_format(y_pred_new, '.2f')}（目标：{safe_format(target_gmv, '.2f')}）")
                 else:
                     st.warning("建议方案的模型预测值不可用。")
             except Exception as e:

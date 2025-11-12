@@ -148,7 +148,7 @@ def page_visual_analysis(state):
     # --- 相关性热力图 ---
     with tab3:
         try:
-            all_cols = features + [state['model_target']]
+            all_cols =  [state['model_target']] + features
             corr = state['df'][all_cols].corr()
             mask = np.triu(np.ones_like(corr, dtype=bool))
             corr_masked = corr.where(~mask)
@@ -156,7 +156,8 @@ def page_visual_analysis(state):
             hm.update_layout(
                 plot_bgcolor="rgba(0,0,0,0)",
                 paper_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="#E6F0F8")
+                font=dict(color="#E6F0F8"),
+                xaxis_side="top"  # 将x轴标签移到顶部
             )
             st.plotly_chart(hm, width="stretch")
         except Exception as e:
