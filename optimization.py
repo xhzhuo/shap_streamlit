@@ -212,3 +212,4 @@ def _fully_constrained_optimization(model, base_x, y_base, y_target, total_budge
             return _budget_constrained_optimization(model, base_x, y_base, y_target, total_budget, weights, sensitivities, min_constraints, max_constraints, X_train_max)
     except Exception:
         return _budget_constrained_optimization(model, base_x, y_base, y_target, total_budget, weights, sensitivities, min_constraints, max_constraints, X_train_max)
+    
