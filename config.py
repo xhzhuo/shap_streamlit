@@ -7,7 +7,7 @@ import streamlit as st
 
 # 页面配置
 PAGE_CONFIG = {
-    "page_title": "Ad Effect Intelligence — DataTech UI v2 (Full)",
+    "page_title": "Ad Effect Intelligence — DataTech",
     "page_icon": "🛰️",
     "layout": "wide",
     "initial_sidebar_state": "expanded"
