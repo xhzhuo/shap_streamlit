@@ -79,48 +79,73 @@ def _improved_sensitivity_estimation(model, base_x, feature_names, X_train_min, 
     return sensitivities
 
 
-def _linear_allocation(model, base_x, y_base, y_target, weights, sensitivities, min_constraints=None, max_constraints=None, X_train_max=None):
-    """线性分配算法"""
-    eps = 1e-8
-    sensitivities_adj = np.where(np.abs(sensitivities) < eps, eps, sensitivities)
-    delta_y = y_target - y_base
-    delta_x = (weights * delta_y) / sensitivities_adj
-    suggested = base_x + delta_x
-    suggested, constraint_status = _apply_constraints(suggested, base_x, min_constraints, max_constraints, X_train_max)
-    try:
-        y_pred_new = float(model.predict(suggested.reshape(1, -1))[0])
-    except Exception:
-        y_pred_new = None
-    return suggested, y_pred_new, constraint_status
-
 # def _linear_allocation(model, base_x, y_base, y_target, weights, sensitivities, min_constraints=None, max_constraints=None, X_train_max=None):
 #     """线性分配算法"""
 #     eps = 1e-8
 #     sensitivities_adj = np.where(np.abs(sensitivities) < eps, eps, sensitivities)
-    
-#     suggested = base_x.copy()
-#     max_iter = 5          # 最大迭代次数
-#     tolerance = 0.01 * abs(y_target)  # 允许误差：目标的1%
-    
-#     for _ in range(max_iter):
+#     delta_y = y_target - y_base
+#     delta_x = (weights * delta_y) / sensitivities_adj
+#     suggested = base_x + delta_x
+#     suggested, constraint_status = _apply_constraints(suggested, base_x, min_constraints, max_constraints, X_train_max)
+#     try:
 #         y_pred_new = float(model.predict(suggested.reshape(1, -1))[0])
-#         delta_y = y_target - y_pred_new
-        
-#         if abs(delta_y) < tolerance:
-#             break  # 已经足够接近目标
-        
-#         # 按SHAP权重和敏感度分配调整量
-#         delta_x = (weights * delta_y) / sensitivities_adj
-#         suggested = suggested + delta_x
-        
-#         # 约束处理
-#         suggested, _ = _apply_constraints(suggested, base_x, min_constraints, max_constraints,X_train_max)
-    
-#     # 最终预测
-#     y_pred_final = float(model.predict(suggested.reshape(1, -1))[0])
-#     suggested, constraint_status = _apply_constraints(suggested, base_x, min_constraints, max_constraints,X_train_max)
-    
-#     return suggested, y_pred_final, constraint_status
+#     except Exception:
+#         y_pred_new = None
+#     return suggested, y_pred_new, constraint_status
+
+def _linear_allocation(
+    model, base_x, y_base, y_target, weights, sensitivities,
+    min_constraints=None, max_constraints=None, X_train_max=None
+):
+    """线性分配算法（增强版：动态主力识别 + 负敏感度平滑修正）"""
+    eps = 1e-8
+    sensitivities_adj = sensitivities.copy()
+
+    # 1️⃣ 动态计算主力渠道阈值：高于平均权重 1.5 倍 或 Top 20% 的渠道视为主力
+    mean_w = np.mean(weights)
+    quantile_w = np.quantile(weights, 0.8)
+    main_threshold = max(mean_w * 1.5, quantile_w)
+
+    # 2️⃣ 对过小或负的敏感度进行业务修正
+    for i in range(len(sensitivities_adj)):
+        s = sensitivities_adj[i]
+        w = weights[i]
+
+        if abs(s) < eps:
+            sensitivities_adj[i] = eps  # 防止除0
+        elif s < 0:
+            if w >= main_threshold:
+                # 主力渠道：平滑修正为小正值，保留可微调空间
+                sensitivities_adj[i] = eps * (1 + 5 * (w / main_threshold))
+            else:
+                # 边缘渠道：允许继续保留负号（即模型认为可减投）
+                sensitivities_adj[i] = s * 0.5  # 缓和其影响，避免过度削减
+
+    # 3️⃣ 多轮线性逼近
+    suggested = base_x.copy()
+    max_iter = 5
+    tolerance = 0.01 * abs(y_target)  # 允许误差：目标的1%
+
+    for _ in range(max_iter):
+        y_pred_new = float(model.predict(suggested.reshape(1, -1))[0])
+        delta_y = y_target - y_pred_new
+
+        if abs(delta_y) < tolerance:
+            break  # 已经足够接近目标
+
+        # 按 SHAP 权重和修正后敏感度分配调整量
+        delta_x = (weights * delta_y) / sensitivities_adj
+        suggested = suggested + 0.8 * delta_x  # 缓步更新
+
+        # 应用约束
+        suggested, _ = _apply_constraints(suggested, base_x, min_constraints, max_constraints, X_train_max)
+
+    # 4️⃣ 最终结果
+    y_pred_final = float(model.predict(suggested.reshape(1, -1))[0])
+    suggested, constraint_status = _apply_constraints(suggested, base_x, min_constraints, max_constraints, X_train_max)
+
+    return suggested, y_pred_final, constraint_status
+
 
 
 def _budget_constrained_optimization(model, base_x, y_base, y_target, total_budget, weights, sensitivities, min_constraints, max_constraints, X_train_max):
