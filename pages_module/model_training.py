@@ -17,16 +17,36 @@ def page_train_and_eval(state):
         return
 
     # 目标选择
-    target = st.selectbox("🎯 目标变量 (Target)", options=numeric_cols, index=0)
+    if 'target_var' not in st.session_state:
+        st.session_state.target_var = numeric_cols[0]
+    
+    target = st.selectbox("🎯 目标变量 (Target)", options=numeric_cols, index=numeric_cols.index(st.session_state.target_var))
+    
+    # 当目标变量改变时，重置特征选择
+    if target != st.session_state.target_var:
+        st.session_state.target_var = target
+        st.session_state.selected_features = []
 
     # 特征选择
     available_features = [c for c in numeric_cols if c != target]
     default_feats = available_features[:6] if len(available_features) > 0 else []
+    
+    # 初始化 session_state 中的特征选择
+    if 'selected_features' not in st.session_state:
+        st.session_state.selected_features = default_feats
+    
+    # 过滤已保存的特征选择（确保都在可用选项中）
+    valid_features = [f for f in st.session_state.selected_features if f in available_features]
+    if not valid_features and st.session_state.selected_features:
+        valid_features = default_feats
+    
     selected_features = st.multiselect(
         "选择特征变量（可以搜索并多选）",
         options=available_features,
-        default=default_feats
+        default=valid_features,
+        key='selected_features'
     )
+    
     st.markdown(f"已选特征： **{len(selected_features)}** 个")
 
     st.markdown("---")
