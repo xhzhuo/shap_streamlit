@@ -16,11 +16,12 @@ def page_train_and_eval(state):
         st.warning("当前数据中没有检测到数值型列，无法训练模型。")
         return
 
-    # 检测数据是否已更新（通过检查DataFrame的id）
-    current_df_id = id(df)
-    if state.get('_last_df_id') != current_df_id:
+    # 检测数据是否已更新（通过检查文件名、数据形状）
+    current_data_key = (state.get('filename', ''), df.shape[0], df.shape[1])
+    last_data_key = state.get('_last_data_key')
+    
+    if last_data_key is not None and last_data_key != current_data_key:
         # 数据已更新（新上传），重置相关状态
-        state['_last_df_id'] = current_df_id
         state['target_var'] = numeric_cols[0]
         state['selected_features'] = []
         # 清除旧的模型训练结果
@@ -29,10 +30,9 @@ def page_train_and_eval(state):
         state.pop('model_features', None)
         state.pop('model_target', None)
         st.info("检测到新数据已上传，已重置特征选择和模型状态。")
-    else:
-        # 首次访问此页面，初始化状态
-        if '_last_df_id' not in state:
-            state['_last_df_id'] = current_df_id
+    
+    # 更新数据标识
+    state['_last_data_key'] = current_data_key
 
     # 目标选择
     if 'target_var' not in state:
