@@ -16,36 +16,51 @@ def page_train_and_eval(state):
         st.warning("当前数据中没有检测到数值型列，无法训练模型。")
         return
 
+    # 检测数据是否已更新（通过检查列数是否变化）
+    current_cols_hash = hash(tuple(sorted(numeric_cols)))
+    if state.get('_last_cols_hash') != current_cols_hash:
+        # 数据已更新，重置相关状态
+        state['_last_cols_hash'] = current_cols_hash
+        state['target_var'] = numeric_cols[0]
+        state['selected_features'] = []
+        # 清除旧的模型训练结果
+        state.pop('model', None)
+        state.pop('metrics', None)
+        state.pop('model_features', None)
+        state.pop('model_target', None)
+        st.info("检测到新数据已上传，已重置特征选择和模型状态。")
+
     # 目标选择
-    if 'target_var' not in st.session_state:
-        st.session_state.target_var = numeric_cols[0]
+    if 'target_var' not in state or state['target_var'] not in numeric_cols:
+        state['target_var'] = numeric_cols[0]
     
-    target = st.selectbox("🎯 目标变量 (Target)", options=numeric_cols, index=numeric_cols.index(st.session_state.target_var))
+    target = st.selectbox("🎯 目标变量 (Target)", options=numeric_cols, index=numeric_cols.index(state['target_var']))
     
     # 当目标变量改变时，重置特征选择
-    if target != st.session_state.target_var:
-        st.session_state.target_var = target
-        st.session_state.selected_features = []
+    if target != state.get('target_var'):
+        state['target_var'] = target
+        state['selected_features'] = []
 
     # 特征选择
     available_features = [c for c in numeric_cols if c != target]
-    default_feats = available_features[:6] if len(available_features) > 0 else []
     
-    # 初始化 session_state 中的特征选择
-    if 'selected_features' not in st.session_state:
-        st.session_state.selected_features = default_feats
+    # 初始化或更新特征选择
+    if 'selected_features' not in state or not state['selected_features']:
+        state['selected_features'] = available_features[:6] if len(available_features) > 0 else []
     
-    # 过滤已保存的特征选择（确保都在可用选项中）
-    valid_features = [f for f in st.session_state.selected_features if f in available_features]
-    if not valid_features and st.session_state.selected_features:
-        valid_features = default_feats
+    # 过滤保存的特征，确保都在可用选项中
+    valid_features = [f for f in state.get('selected_features', []) if f in available_features]
+    if not valid_features:
+        valid_features = available_features[:6] if len(available_features) > 0 else []
     
     selected_features = st.multiselect(
         "选择特征变量（可以搜索并多选）",
         options=available_features,
-        default=valid_features,
-        key='selected_features'
+        default=valid_features
     )
+    
+    # 更新状态
+    state['selected_features'] = selected_features
     
     st.markdown(f"已选特征： **{len(selected_features)}** 个")
 
