@@ -22,7 +22,7 @@ def page_data_upload(state):
     if state.get('df') is not None:
         st.markdown("### 数据预览")
         with st.expander("📊 表格预览（前 200 行）"):
-            st.dataframe(state['df'].head(200), width="stretch")
+            st.dataframe(state['df'].head(200), use_container_width=True)
         num_cols = state.get('numeric_cols', [])
         st.write(f"检测到 {len(num_cols)} 个数值型字段：")
         st.write(", ".join(num_cols[:30]) + ("..." if len(num_cols)>30 else ""))

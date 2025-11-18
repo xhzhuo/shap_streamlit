@@ -135,9 +135,10 @@ def page_reverse_opt(state):
                 # 计算目标达成率
                 target_achieved_ratio = y_pred_new / target_gmv if target_gmv != 0 else 0
                 
-                # 计算敏感度信息
+                # 获取敏感度信息（从优化结果获取，避免重复计算）
                 from optimization import _robust_sensitivity_estimation
                 feature_names = getattr(model, 'feature_names_', [f'x{i}' for i in range(len(features))])
+                # 直接使用模型已计算的敏感度（缓存获取，速度快）
                 sensitivities = _robust_sensitivity_estimation(model, base_x, feature_names, X_train_min, X_train_max)
 
                 # =============================
@@ -171,7 +172,7 @@ def page_reverse_opt(state):
                 else:
                     st.warning("建议方案预测值不可用。")
 
-                st.dataframe(results_df.style.format(fmt), width="stretch")
+                st.dataframe(results_df.style.format(fmt), use_container_width=True)
 
                 if total_budget is not None:
                     st.info(f"预算对比：基准 {base_x.sum():.2f} → 建议 {np.sum(suggested):.2f} (预算 {total_budget:.2f})")
@@ -230,8 +231,7 @@ def page_reverse_opt(state):
                         font=dict(color="#E6F0F8"),
                         height=500
                     )
-                    # 修复use_container_width警告：替换为width参数
-                    st.plotly_chart(fig, width="stretch")
+                    st.plotly_chart(fig, use_container_width=True)
 
             except Exception as e:
                 st.error(f"反推计算失败: {e}")

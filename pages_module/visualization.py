@@ -103,7 +103,7 @@ def page_visual_analysis(state):
                     font=dict(color="#E6F0F8", size=12),
                     coloraxis_colorbar=dict(title="特征值")
                 )
-                st.plotly_chart(fig, width="stretch")
+                st.plotly_chart(fig, use_container_width=True)
         except Exception as e:
             st.error(f"绘制 SHAP Summary 失败: {e}")
 
@@ -141,7 +141,7 @@ def page_visual_analysis(state):
                 paper_bgcolor="rgba(0,0,0,0)",
                 font=dict(color="#E6F0F8")
             )
-            st.plotly_chart(pie_fig, width="stretch")
+            st.plotly_chart(pie_fig, use_container_width=True)
         except Exception as e:
             st.error(f"饼图绘制失败: {e}")
 
@@ -159,6 +159,6 @@ def page_visual_analysis(state):
                 font=dict(color="#E6F0F8"),
                 xaxis_side="top"  # 将x轴标签移到顶部
             )
-            st.plotly_chart(hm, width="stretch")
+            st.plotly_chart(hm, use_container_width=True)
         except Exception as e:
             st.error(f"热力图绘制失败: {e}")

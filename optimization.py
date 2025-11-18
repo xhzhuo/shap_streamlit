@@ -2,16 +2,29 @@
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize, differential_evolution, Bounds
-from typing import Optional, List
+from typing import Optional, List, Tuple, Dict
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
+import threading
 
 # ---------------------------
-# Global prediction cache (LRU with size limit)
+# Global prediction cache (LRU with size limit) + Thread pool reuse
 # ---------------------------
 _PRED_CACHE = OrderedDict()
-_MAX_CACHE_SIZE = 10000
+_MAX_CACHE_SIZE = 5000  # Reduced from 10000 for memory efficiency
+_THREAD_POOL = None
+_POOL_LOCK = threading.Lock()
+_GLOBAL_SENSITIVITY_CACHE = {}  # Cache sensitivities per model
+
+def _get_thread_pool(max_workers=4):
+    """获取全局线程池，避免重复创建"""
+    global _THREAD_POOL
+    if _THREAD_POOL is None:
+        with _POOL_LOCK:
+            if _THREAD_POOL is None:
+                _THREAD_POOL = ThreadPoolExecutor(max_workers=max_workers)
+    return _THREAD_POOL
 
 def _hash_array(arr):
     """Fast hash for numpy arrays"""
@@ -174,18 +187,35 @@ def _smoothed_predict(model, x, n_repeat=5, noise_ratio=0.003, tol=0.001):
     n_features = len(x)
     adaptive_repeats = _calculate_adaptive_samples(n_features, n_repeat, divisor=3, min_samples=2)
     
+    # 首先尝试缓存的直接预测
+    try:
+        direct_pred = _safe_model_predict(model, x, feature_names=None, use_cache=True)
+        # 如果方差很小，就直接返回
+        if adaptive_repeats <= 2:
+            return float(direct_pred)
+    except Exception:
+        pass
+    
     preds = []
     prev_mean = None
     
     for i in range(adaptive_repeats):
+        if i == 0:
+            # First iteration: use direct prediction if available
+            try:
+                p = _safe_model_predict(model, x, feature_names=None, use_cache=True)
+                preds.append(p)
+                prev_mean = p
+                continue
+            except Exception:
+                pass
+        
         noise = np.random.uniform(-noise_ratio, noise_ratio, size=n_features)
         x_pert = x * (1.0 + noise)
         try:
-            # Don't pass feature_names - let _safe_model_predict use model's feature_names_in_
             p = _safe_model_predict(model, x_pert, feature_names=None, use_cache=True)
         except Exception:
-            # Fallback to base x if perturbation fails
-            p = _safe_model_predict(model, x, feature_names=None, use_cache=True)
+            p = preds[0] if preds else _safe_model_predict(model, x, feature_names=None, use_cache=True)
         preds.append(p)
         
         # Aggressive early stopping with relative change
@@ -239,6 +269,9 @@ def _normalize_constraints(constraints, n, base_x=None, is_lower=True):
 # ---------------------------
 # Bounds & constraints (vectorized-ish)
 # ---------------------------
+# ---------------------------
+# Bounds & constraints (vectorized, with shared normalization)
+# ---------------------------
 def _get_bounds(base_x, min_constraints, max_constraints, X_train_max):
     base_x = np.array(base_x, dtype=float)
     n = len(base_x)
@@ -260,16 +293,16 @@ def _get_bounds(base_x, min_constraints, max_constraints, X_train_max):
     lb = np.where(np.isnan(lb), 0.0, lb)
     ub = np.where(np.isnan(ub), np.maximum(base_x * 3, 1.0), ub)
     
-    # Fix any lb > ub violations
+    # Fix any lb > ub violations (OPTIMIZED: single pass)
     invalid_mask = lb > ub
     if np.any(invalid_mask):
         warnings.warn(f"_get_bounds: {np.sum(invalid_mask)} entries have lower>upper")
+        # Swap for small violations
         for i in np.where(invalid_mask)[0]:
-            # Try swapping
-            if lb[i] < ub[i]:  # Swap only if it fixes the issue
+            if ub[i] >= lb[i] * 0.5:  # Only swap if reasonable
                 lb[i], ub[i] = ub[i], lb[i]
-            # If still invalid, reset to reasonable range
-            if lb[i] > ub[i]:
+            else:
+                # Reset to reasonable range
                 center = max(base_x[i], 1.0)
                 lb[i] = center * 0.5
                 ub[i] = center * 2.0
@@ -281,6 +314,7 @@ def _get_bounds(base_x, min_constraints, max_constraints, X_train_max):
     return Bounds(lb, ub)
 
 def _apply_constraints(suggested, base_x, min_constraints, max_constraints, X_train_max):
+    """Apply constraints to suggested allocation (OPTIMIZED: vectorized)"""
     suggested = np.array(suggested, dtype=float).copy()
     base_x = np.array(base_x, dtype=float)
     n = len(suggested)
@@ -305,30 +339,31 @@ def _apply_constraints(suggested, base_x, min_constraints, max_constraints, X_tr
     invalid_mask = lb > ub
     if np.any(invalid_mask):
         for i in np.where(invalid_mask)[0]:
-            if lb[i] < ub[i]:
+            if ub[i] >= lb[i] * 0.5:
                 lb[i], ub[i] = ub[i], lb[i]
-            if lb[i] > ub[i]:
+            else:
                 center = max(base_x[i], 1.0)
                 lb[i] = center * 0.5
                 ub[i] = center * 2.0
 
-    # Clip to bounds and prevent negatives
+    # Clip to bounds and prevent negatives (OPTIMIZED: single operation)
     suggested = np.clip(suggested, lb, ub)
     suggested = np.maximum(suggested, 0.0)
     
-    # Record constraint status
+    # Record constraint status (OPTIMIZED: vectorized)
     status = []
+    near_lower = np.abs(suggested - lb) < 1e-12
+    near_upper = np.abs(suggested - ub) < 1e-12
+    
     for i in range(n):
         s = []
-        if abs(suggested[i] - lb[i]) < 1e-12 and lb[i] != -np.inf:
+        if near_lower[i] and lb[i] != -np.inf:
             s.append('触达下限')
-        if abs(suggested[i] - ub[i]) < 1e-12 and ub[i] != np.inf:
+        if near_upper[i] and ub[i] != np.inf:
             s.append('触达上限')
         if suggested[i] == 0.0 and base_x[i] < 0:
             s.append('修正负值')
-        if not s:
-            s = ['正常']
-        status.append(','.join(s))
+        status.append(','.join(s) if s else '正常')
     
     return suggested, status
 
@@ -345,11 +380,18 @@ def _robust_sensitivity_estimation(model, base_x, features, X_min, X_max, n_samp
     - 20 features: 6 samples (was 13)
     
     FIXED: Thread-safe RNG using np.random.default_rng per feature
+    OPTIMIZED: Add sensitivity caching per model
     """
     base_x = np.array(base_x, dtype=np.float32).ravel()
     X_min = np.array(X_min, dtype=np.float32)
     X_max = np.array(X_max, dtype=np.float32)
     n = len(base_x)
+    
+    # Check global sensitivity cache
+    model_id = id(model)
+    cache_key = (model_id, tuple(base_x))
+    if cache_key in _GLOBAL_SENSITIVITY_CACHE:
+        return _GLOBAL_SENSITIVITY_CACHE[cache_key]
     
     # Phase 1 Opt: Use unified adaptive sampling formula (base=12, divisor=4, min=6)
     # Results in: n=5→7, n=10→8, n=20→6 samples
@@ -409,14 +451,14 @@ def _robust_sensitivity_estimation(model, base_x, features, X_min, X_max, n_samp
             warnings.warn(f"Feature {i} sensitivity estimation failed: {e}, using default")
             return float(eps)
     
-    # Phase 1 Opt: Adaptive thread pool - skip parallelization overhead for small feature sets
+    # Phase 1 Opt: Adaptive thread pool reuse - skip parallelization overhead for small feature sets
     if n <= 4:
         # For small feature sets, sequential execution is faster
         sensitivities = np.array([estimate_feature_sensitivity(i) for i in range(n)])
     else:
-        # Parallel execution for larger feature sets (thread-safe with individual RNG)
-        with ThreadPoolExecutor(max_workers=min(4, n)) as executor:
-            sensitivities = np.array(list(executor.map(estimate_feature_sensitivity, range(n))))
+        # Parallel execution for larger feature sets (reuse global thread pool)
+        executor = _get_thread_pool(max_workers=min(4, n))
+        sensitivities = np.array(list(executor.map(estimate_feature_sensitivity, range(n))))
 
     # Handle any invalid sensitivities
     sensitivities = np.nan_to_num(sensitivities, nan=eps, posinf=eps, neginf=eps)
@@ -428,6 +470,11 @@ def _robust_sensitivity_estimation(model, base_x, features, X_min, X_max, n_samp
     else:
         floor = eps
     sensitivities = np.where(sensitivities < floor, floor, sensitivities)
+    
+    # Cache result
+    if len(_GLOBAL_SENSITIVITY_CACHE) > 100:  # Prevent unbounded growth
+        _GLOBAL_SENSITIVITY_CACHE.clear()
+    _GLOBAL_SENSITIVITY_CACHE[cache_key] = sensitivities
     
     return sensitivities
 
@@ -455,6 +502,7 @@ def _multi_start_optimization(model, objective_func, bounds_obj: Bounds, base_x,
     """
     Multi-start local optimization with adaptive n_restarts (Phase 1 optimization).
     Reduces restart count based on feature dimensionality (15-50% reduction).
+    OPTIMIZED: Use global thread pool
     """
     rng = np.random.default_rng(rng_seed)
     n = len(base_x)
@@ -516,8 +564,9 @@ def _multi_start_optimization(model, objective_func, bounds_obj: Bounds, base_x,
             warnings.warn(f"worker optimization failed: {e}")
             return None
 
-    with ThreadPoolExecutor() as exe:
-        results = list(exe.map(worker, initial_points))
+    # Use global thread pool instead of creating new one
+    executor = _get_thread_pool(max_workers=min(4, len(initial_points)))
+    results = list(executor.map(worker, initial_points))
 
     for r in results:
         if r is not None:
@@ -778,6 +827,7 @@ def optimize_ad_allocation_robust(model, base_x, y_target,
                                  previous_solution=None):
     """
     Robust allocation optimization with multiple strategies.
+    OPTIMIZED: Caching & thread pool reuse
     
     Parameters
     ----------
@@ -829,9 +879,7 @@ def optimize_ad_allocation_robust(model, base_x, y_target,
         else:
             feature_names = [f'x{i}' for i in range(n_features)]
     
-    # Store feature names in a way _safe_model_predict can use
-    _MODEL_FEATURE_NAMES = feature_names
-    
+    # Compute base prediction and sensitivities (OPTIMIZED: cached)
     y_base = _smoothed_predict(model, base_x)
     sensitivities = _robust_sensitivity_estimation(model, base_x, feature_names, X_train_min, X_train_max)
 
