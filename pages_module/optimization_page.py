@@ -168,7 +168,7 @@ def page_reverse_opt(state):
                 st.markdown(f"### 建议方案")
                 if y_pred_new is not None:
                     st.success(f"预测 {state.get('model_target','目标')}: {safe_format(y_pred_new, '.2f')}（目标：{safe_format(target_gmv, '.2f')}，达成率：{safe_format(target_achieved_ratio * 100, '.1f')}%）")
-                    st.caption(f"使用的优化方法: {method_used} (鲁棒性级别: {robustness_level})")
+                    # st.caption(f"使用的优化方法: {method_used} (鲁棒性级别: {robustness_level})")
                 else:
                     st.warning("建议方案预测值不可用。")
 
