@@ -10,7 +10,7 @@ shap==0.49.1
 joblib==1.5.2
 
 # Web & 接口
-streamlit==1.51.0
+streamlit==1.43.1
 fastapi==0.120.4
 uvicorn==0.38.0
 pydantic==2.11.10

@@ -43,7 +43,7 @@ def page_train_and_eval(state):
         state['target_var'] = numeric_cols[0]
     
     target_idx = numeric_cols.index(state['target_var'])
-    target = st.selectbox("🎯 目标变量 (Target)", options=numeric_cols, index=target_idx)
+    target = st.selectbox("🎯 目标变量 (Target)", options=numeric_cols, index=target_idx, key="target_select")
     
     # 当目标变量改变时，重置特征选择
     if target != state['target_var']:
@@ -53,23 +53,24 @@ def page_train_and_eval(state):
     # 特征选择
     available_features = [c for c in numeric_cols if c != target]
     
-    # 初始化或获取特征选择
-    if 'selected_features' not in state:
+    # 初始化特征选择（仅在第一次或目标变量改变时）
+    if 'selected_features' not in state or not state['selected_features']:
         state['selected_features'] = available_features[:6] if len(available_features) > 0 else []
     
-    # 过滤保存的特征，确保都在可用选项中（应对目标变量改变的情况）
+    # 确保保存的特征都在可用列表中
     valid_features = [f for f in state['selected_features'] if f in available_features]
-    if not valid_features and state['selected_features']:
-        # 如果没有有效特征但之前有选择过，使用默认值
+    if not valid_features:
         valid_features = available_features[:6] if len(available_features) > 0 else []
     
+    # 使用 key 确保状态管理的独立性
     selected_features = st.multiselect(
         "选择特征变量（可以搜索并多选）",
         options=available_features,
-        default=valid_features
+        default=valid_features,
+        key=f"features_select_{target}"  # 使用target作为key的一部分，目标变量改变时会重置
     )
     
-    # 更新状态
+    # 直接更新状态（Streamlit会正确处理）
     state['selected_features'] = selected_features
     
     st.markdown(f"已选特征： **{len(selected_features)}** 个")
