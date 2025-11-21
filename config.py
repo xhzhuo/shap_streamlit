@@ -5,6 +5,9 @@
 
 import streamlit as st
 
+# 应用密码配置
+APP_PASSWORD = "datatech"  # 修改此处设置你的密码
+
 # 页面配置
 PAGE_CONFIG = {
     "page_title": "Ad Effect Intelligence — DataTech",
