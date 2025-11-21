@@ -61,16 +61,21 @@ def page_train_and_eval(state):
     valid_features = [f for f in state['selected_features'] if f in available_features]
     if not valid_features:
         valid_features = available_features[:6] if len(available_features) > 0 else []
+        state['selected_features'] = valid_features
     
-    # 使用 key 确保状态管理的独立性
+    # 初始化 session_state（仅在第一次时）
+    if f"features_select_{target}" not in st.session_state:
+        st.session_state[f"features_select_{target}"] = valid_features
+    
+    # 多选框
     selected_features = st.multiselect(
         "选择特征变量（可以搜索并多选）",
         options=available_features,
-        default=valid_features,
-        key=f"features_select_{target}"  # 使用target作为key的一部分，目标变量改变时会重置
+        default=st.session_state.get(f"features_select_{target}", valid_features),
+        key=f"features_select_{target}"
     )
     
-    # 直接更新状态（Streamlit会正确处理）
+    # 仅更新自定义状态（不再修改 session_state，避免 Streamlit 错误）
     state['selected_features'] = selected_features
     
     st.markdown(f"已选特征： **{len(selected_features)}** 个")
