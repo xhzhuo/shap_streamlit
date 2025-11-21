@@ -169,25 +169,53 @@ def page_visual_analysis(state):
                 importance = importance[:min_len]
                 features_list = features_list[:min_len]
 
+            # 计算百分比
+            total_importance = np.sum(importance)
+            percentages = (importance / total_importance * 100) if total_importance > 0 else importance
+            
             pie_df = pd.DataFrame({
                 "feature": features_list,
-                "importance": importance
+                "importance": importance,
+                "percentage": percentages
             }).sort_values("importance", ascending=False)
 
-            pie_fig = px.pie(
-                pie_df,
-                names="feature",
-                values="importance",
-                hole=0.35,
-                color_discrete_sequence=px.colors.qualitative.Pastel,
-                title="特征贡献占比"
-            )
-            pie_fig.update_layout(
-                plot_bgcolor="rgba(0,0,0,0)",
-                paper_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="#E6F0F8")
-            )
-            st.plotly_chart(pie_fig, use_container_width=True)
+            # 左右分栏布局
+            col1, col2 = st.columns([1.2, 1])
+            
+            with col1:
+                pie_fig = px.pie(
+                    pie_df,
+                    names="feature",
+                    values="importance",
+                    hole=0.35,
+                    color_discrete_sequence=px.colors.qualitative.Pastel,
+                    title="特征贡献占比"
+                )
+                pie_fig.update_layout(
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#E6F0F8"),
+                    height=500
+                )
+                st.plotly_chart(pie_fig, use_container_width=True)
+            
+            with col2:
+                st.markdown("#### 📊 贡献度明细")
+                
+                # 格式化表格数据
+                display_df = pie_df.copy()
+                display_df['百分比'] = display_df['percentage'].apply(lambda x: f"{x:.2f}%")
+                display_df = display_df[['feature', '百分比']]
+                display_df.columns = ['特征', '占比']
+                display_df.index = range(1, len(display_df) + 1)
+                
+                # 使用样式化表格
+                st.dataframe(
+                    display_df,
+                    use_container_width=True,
+                    height=min(400, 35 + len(display_df) * 35)
+                )
+                
         except Exception as e:
             st.error(f"饼图绘制失败: {e}")
 
@@ -237,30 +265,57 @@ def page_visual_analysis(state):
                 explained_importance = explained_importance[:min_len]
                 features_list = features_list[:min_len]
             
-            # 添加未解释方差
+            # 添加未观测因素
             unexplained = 1.0 - test_r2
             feature_names = list(features_list) + ["未观测因素"]
             importance_values = list(explained_importance) + [unexplained]
             
+            # 计算百分比（已经是0-1的值，直接乘100）
+            percentages = [val * 100 for val in importance_values]
+            
             pie_df_adjusted = pd.DataFrame({
                 "feature": feature_names,
-                "importance": importance_values
+                "importance": importance_values,
+                "percentage": percentages
             }).sort_values("importance", ascending=False)
             
-            pie_fig_adjusted = px.pie(
-                pie_df_adjusted,
-                names="feature",
-                values="importance",
-                hole=0.35,
-                color_discrete_sequence=px.colors.qualitative.Pastel,
-                title=f"特征贡献占比"
-            )
-            pie_fig_adjusted.update_layout(
-                plot_bgcolor="rgba(0,0,0,0)",
-                paper_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="#E6F0F8")
-            )
-            st.plotly_chart(pie_fig_adjusted, use_container_width=True)
+            # 左右分栏布局
+            col1, col2 = st.columns([1.2, 1])
+            
+            with col1:
+                pie_fig_adjusted = px.pie(
+                    pie_df_adjusted,
+                    names="feature",
+                    values="importance",
+                    hole=0.35,
+                    color_discrete_sequence=px.colors.qualitative.Pastel,
+                    title=f"特征贡献占比"
+                )
+                pie_fig_adjusted.update_layout(
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#E6F0F8"),
+                    height=500
+                )
+                st.plotly_chart(pie_fig_adjusted, use_container_width=True)
+            
+            with col2:
+                st.markdown("#### 贡献度明细")
+                
+                # 格式化表格数据
+                display_df = pie_df_adjusted.copy()
+                display_df['百分比'] = display_df['percentage'].apply(lambda x: f"{x:.2f}%")
+                display_df = display_df[['feature', '百分比']]
+                display_df.columns = ['特征/因素', '占比']
+                display_df.index = range(1, len(display_df) + 1)
+                
+                # 使用样式化表格
+                st.dataframe(
+                    display_df,
+                    use_container_width=True,
+                    height=min(400, 35 + len(display_df) * 35)
+                )
+                
         except Exception as e:
             st.error(f"贡献度分解饼图绘制失败: {e}")
             import traceback
