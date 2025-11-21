@@ -262,6 +262,6 @@ def page_visual_analysis(state):
             )
             st.plotly_chart(pie_fig_adjusted, use_container_width=True)
         except Exception as e:
-            st.error(f"贡献度分解饼图绘制失败: {e}")
+            st.error(f"贡献度分解饼图绘制失败 : {e}")
             import traceback
             st.error(f"详细错误:\n{traceback.format_exc()}")
