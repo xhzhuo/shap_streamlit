@@ -30,7 +30,7 @@ def page_visual_analysis(state):
                 return
 
     shap_vals = np.array(state['shap_values'])
-    tab1, tab2, tab3 = st.tabs(["SHAP Summary", "特征贡献度", "相关性热力图"])
+    tab1, tab2, tab3, tab4 = st.tabs(["SHAP Summary", "特征贡献度", "相关性热力图", "未观测因素"])
 
     # --- SHAP Summary ---
     with tab1:
@@ -208,3 +208,60 @@ def page_visual_analysis(state):
             st.plotly_chart(hm, use_container_width=True)
         except Exception as e:
             st.error(f"热力图绘制失败: {e}")
+
+    # --- 贡献度分解 ---
+    with tab4:
+        try:
+            # 获取测试集R²值
+            test_r2 = state.get('metrics', {}).get('test_r2', 0.0)
+            if test_r2 is None or np.isnan(test_r2):
+                test_r2 = 0.0
+            
+            # 计算SHAP贡献度
+            importance = np.abs(state['shap_values'])
+            if isinstance(importance, list):
+                importance = np.mean([np.abs(v) for v in importance], axis=0)
+            importance = np.mean(np.abs(importance), axis=0)
+            
+            # 归一化SHAP贡献度到[0, 1]
+            importance_normalized = importance / np.sum(importance) if np.sum(importance) > 0 else importance
+            
+            # 乘以R²值（表示能解释的方差）
+            explained_importance = importance_normalized * test_r2
+            
+            features_list = features
+            len_imp = len(explained_importance)
+            len_feat = len(features_list)
+            if len_imp != len_feat:
+                min_len = min(len_imp, len_feat)
+                explained_importance = explained_importance[:min_len]
+                features_list = features_list[:min_len]
+            
+            # 添加未解释方差
+            unexplained = 1.0 - test_r2
+            feature_names = list(features_list) + ["未观测因素"]
+            importance_values = list(explained_importance) + [unexplained]
+            
+            pie_df_adjusted = pd.DataFrame({
+                "feature": feature_names,
+                "importance": importance_values
+            }).sort_values("importance", ascending=False)
+            
+            pie_fig_adjusted = px.pie(
+                pie_df_adjusted,
+                names="feature",
+                values="importance",
+                hole=0.35,
+                color_discrete_sequence=px.colors.qualitative.Pastel,
+                title=f"未观测因素占比"
+            )
+            pie_fig_adjusted.update_layout(
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#E6F0F8")
+            )
+            st.plotly_chart(pie_fig_adjusted, use_container_width=True)
+        except Exception as e:
+            st.error(f"贡献度分解饼图绘制失败: {e}")
+            import traceback
+            st.error(f"详细错误:\n{traceback.format_exc()}")
