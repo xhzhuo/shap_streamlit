@@ -239,7 +239,7 @@ def page_visual_analysis(state):
             
             # 添加未解释方差
             unexplained = 1.0 - test_r2
-            feature_names = list(features_list) + ["特征贡献占比"]
+            feature_names = list(features_list) + ["未观测因素"]
             importance_values = list(explained_importance) + [unexplained]
             
             pie_df_adjusted = pd.DataFrame({
@@ -253,7 +253,7 @@ def page_visual_analysis(state):
                 values="importance",
                 hole=0.35,
                 color_discrete_sequence=px.colors.qualitative.Pastel,
-                title=f"未观测因素占比"
+                title=f"特征贡献占比"
             )
             pie_fig_adjusted.update_layout(
                 plot_bgcolor="rgba(0,0,0,0)",
