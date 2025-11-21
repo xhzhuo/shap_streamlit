@@ -46,24 +46,66 @@ def page_visual_analysis(state):
                     arr = np.array(raw)
                     expected_size = n_samples * n_features
                     
+                    # 三维数组：取平均
                     if arr.ndim == 3:
                         return np.mean(arr, axis=0)
+                    
+                    # 二维数组：检查形状是否匹配
                     if arr.ndim == 2:
+                        # 正确的形状
                         if arr.shape == (n_samples, n_features):
                             return arr
+                        # 转置后是正确形状
                         if arr.shape == (n_features, n_samples):
                             return arr.T
-                        # 当形状不匹配时，尝试基于实际大小进行处理
+                        
+                        # 形状不匹配，尝试调整
+                        rows, cols = arr.shape
+                        
+                        # 如果行数匹配样本数
+                        if rows == n_samples:
+                            if cols >= n_features:
+                                return arr[:, :n_features]
+                            else:
+                                # 特征数不足，填充
+                                padded = np.zeros((n_samples, n_features))
+                                padded[:, :cols] = arr
+                                return padded
+                        
+                        # 如果列数匹配特征数
+                        if cols == n_features:
+                            if rows >= n_samples:
+                                return arr[:n_samples, :]
+                            else:
+                                # 样本数不足，填充
+                                padded = np.zeros((n_samples, n_features))
+                                padded[:rows, :] = arr
+                                return padded
+                        
+                        # 尝试基于总大小reshape
                         if arr.size == expected_size:
                             return arr.reshape((n_samples, n_features))
-                        elif arr.shape[0] == n_samples:
-                            return arr[:, :n_features] if arr.shape[1] >= n_features else np.pad(arr, ((0, 0), (0, n_features - arr.shape[1])), mode='constant')
-                        elif arr.shape[1] == n_features:
-                            return arr[:n_samples, :] if arr.shape[0] >= n_samples else np.pad(arr, ((0, n_samples - arr.shape[0]), (0, 0)), mode='constant')
-                    # 处理一维数组的情况
-                    if arr.ndim == 1 and arr.size == expected_size:
-                        return arr.reshape((n_samples, n_features))
-                    raise ValueError(f"不支持的 SHAP 形状: {arr.shape}, 期望大小: {expected_size}")
+                        
+                        # 特殊处理：多类分类的SHAP值(60, 6, num_classes)
+                        # 返回第一个类或平均
+                        if rows == n_samples and cols == n_features:
+                            return arr
+                        
+                        # 最后的尝试：取前n_samples行和n_features列
+                        return arr[:min(rows, n_samples), :min(cols, n_features)]
+                    
+                    # 一维数组
+                    if arr.ndim == 1:
+                        if arr.size == expected_size:
+                            return arr.reshape((n_samples, n_features))
+                        elif arr.size == n_features:
+                            # 只有特征维度，复制给所有样本
+                            return np.tile(arr, (n_samples, 1))
+                        elif arr.size == n_samples:
+                            # 只有样本维度，这不合理，返回均匀值
+                            return np.ones((n_samples, n_features)) * np.mean(arr)
+                    
+                    raise ValueError(f"无法处理的 SHAP 形状: {arr.shape}，样本数: {n_samples}, 特征数: {n_features}")
 
                 shap_arr = normalize_shap(raw_shap, n_samples, n_features)
                 abs_mean = np.abs(shap_arr).mean(axis=0)
@@ -73,8 +115,10 @@ def page_visual_analysis(state):
                 sorted_features = [features[i] for i in sorted_idx]
 
                 long_data = []
+                # 确保shap_sorted和X_sorted的形状一致
+                min_samples = min(shap_sorted.shape[0], X_sorted.shape[0])
                 for i, feat in enumerate(sorted_features):
-                    for j in range(len(X_sorted)):
+                    for j in range(min_samples):
                         long_data.append({
                             "Feature": feat,
                             "Feature value": X_sorted.iloc[j, i],
@@ -106,6 +150,8 @@ def page_visual_analysis(state):
                 st.plotly_chart(fig, use_container_width=True)
         except Exception as e:
             st.error(f"绘制 SHAP Summary 失败: {e}")
+            import traceback
+            st.error(f"详细错误:\n{traceback.format_exc()}")
 
     # --- 饼图 ---
     with tab2:

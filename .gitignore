@@ -1,0 +1,74 @@
+# Python 环境和缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 虚拟环境
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.pydevproject
+.settings/
+
+# Streamlit
+.streamlit/
+streamlit_app.log
+
+# 数据和缓存文件
+*.parquet
+.cache/
+*.cache
+
+# 临时文件和日志
+*.log
+*.tmp
+temp/
+tmp/
+*.bak
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# 操作系统
+Thumbs.db
+.DS_Store
+Desktop.ini
+
+# 项目特定文件
+output/
+results/
+models/*.pkl
+models/*.joblib

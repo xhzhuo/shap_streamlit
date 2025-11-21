@@ -38,40 +38,221 @@ def page_reverse_opt(state):
     # ==============
     # 参数输入区域
     # ==============
-    target_gmv = st.number_input(
-        f"目标 {state.get('model_target','目标')}",
-        value=float(y_base * 1.1),
-        step=1.0
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        target_gmv = st.number_input(
+            f"🎯 目标 {state.get('model_target','目标')}",
+            value=float(y_base * 1.1),
+            step=y_base * 0.01,
+            help="设置期望达到的目标值"
+        )
+    with col2:
+        target_pct = ((target_gmv - y_base) / y_base * 100) if y_base > 0 else 0
+        st.metric("目标提升", f"{target_pct:.1f}%", delta=f"{target_gmv - y_base:.2f}")
+
+    # ============== 约束设置（重构版）==============
+    st.markdown("---")
+    st.subheader("⚙️ 约束条件设置")
+    
+    # 约束模式选择
+    constraint_mode = st.radio(
+        "选择约束模式",
+        ["无约束（自由优化）", "智能约束（推荐）", "自定义约束"],
+        index=1,
+        horizontal=True,
+        help="智能约束会自动设置合理的上下限"
     )
-
-
-    # ✅ 用户勾选约束条件
-    use_budget = st.checkbox("启用总预算约束", value=False)
-    total_budget = st.number_input(
-        "总预算 (总投放上限)",
-        value=float(base_x.sum()), step=1.0
-    ) if use_budget else None
-
-    use_channel_constraints = st.checkbox("启用渠道上下限约束（每渠道）", value=False)
-    min_constraints, max_constraints = None, None
-    if use_channel_constraints:
-        st.markdown("设置每个渠道的上下限（默认按训练范围推断）")
+    
+    min_constraints, max_constraints, total_budget = None, None, None
+    
+    if constraint_mode == "智能约束（推荐）":
+        st.info("💡 智能约束：自动设置合理的调整范围，防止过度偏离历史数据")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            adjust_range = st.selectbox(
+                "允许调整幅度",
+                ["保守（±30%）", "适中（±50%）", "激进（±100%）"],
+                index=1
+            )
+            range_factor = {"保守（±30%）": 0.3, "适中（±50%）": 0.5, "激进（±100%）": 1.0}[adjust_range]
+        
+        with col2:
+            respect_history = st.checkbox("尊重历史范围", value=True, help="不超过训练数据的最大值")
+        
+        with col3:
+            allow_zero = st.checkbox("允许归零", value=False, help="允许某些渠道降为0")
+        
+        # 自动计算约束
+        min_constraints = []
+        max_constraints = []
+        for i in range(len(features)):
+            # 下限
+            if allow_zero:
+                min_val = 0.0
+            else:
+                min_val = max(0.0, base_x[i] * (1 - range_factor))
+            
+            # 上限
+            max_val = base_x[i] * (1 + range_factor)
+            if respect_history and not np.isnan(X_train_max[i]):
+                max_val = min(max_val, X_train_max[i])
+            
+            min_constraints.append(float(min_val))
+            max_constraints.append(float(max_val))
+        
+        # 显示约束预览
+        with st.expander("📋 查看各渠道约束范围"):
+            preview_data = []
+            for i, feat in enumerate(features):
+                preview_data.append({
+                    "渠道": feat,
+                    "基准": f"{base_x[i]:.2f}",
+                    "最小值": f"{min_constraints[i]:.2f}",
+                    "最大值": f"{max_constraints[i]:.2f}",
+                    "可调范围": f"{((max_constraints[i] - min_constraints[i]) / base_x[i] * 100) if base_x[i] > 0 else 0:.0f}%"
+                })
+            st.dataframe(pd.DataFrame(preview_data), use_container_width=True, hide_index=True)
+    
+    elif constraint_mode == "自定义约束":
+        st.warning("⚠️ 自定义约束：完全自主设置各渠道的上下限")
+        
+        # 初始化约束预设状态
+        if "constraint_preset" not in st.session_state:
+            st.session_state["constraint_preset"] = "⚖️ 灵活调整"
+        
+        # 初始化约束值（如果不存在）
+        for i in range(len(features)):
+            if f"custom_min_{i}" not in st.session_state:
+                st.session_state[f"custom_min_{i}"] = base_x[i] * 0.5
+            if f"custom_max_{i}" not in st.session_state:
+                st.session_state[f"custom_max_{i}"] = base_x[i] * 1.5
+        
+        # 批量设置选项（使用radio自动有选中状态）
+        st.markdown("**⚡ 快速批量设置**")
+        
+        preset_options = [
+            "🔒 锁定基准",
+            "📈 仅增不减", 
+            "⚖️ 灵活调整",
+            "📉 历史范围",
+            "✏️ 自定义"
+        ]
+        
+        preset_help = {
+            "🔒 锁定基准": "最小值=最大值=基准值（不调整）",
+            "📈 仅增不减": "最小值=基准，最大值=基准×2（只增不减）",
+            "⚖️ 灵活调整": "最小值=基准×0.5，最大值=基准×1.5（推荐）",
+            "📉 历史范围": "使用训练数据的实际最小值和最大值",
+            "✏️ 自定义": "手动设置每个渠道的约束范围"
+        }
+        
+        # 显示当前预设的说明
+        st.caption(f"💡 {preset_help.get(st.session_state['constraint_preset'], '')}")
+        
+        selected_preset = st.radio(
+            "选择约束预设",
+            preset_options,
+            index=preset_options.index(st.session_state["constraint_preset"]),
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+        
+        # 如果选择变化，应用新的预设
+        if selected_preset != st.session_state["constraint_preset"]:
+            st.session_state["constraint_preset"] = selected_preset
+            
+            # 应用预设
+            if selected_preset == "🔒 锁定基准":
+                for i in range(len(features)):
+                    st.session_state[f"custom_min_{i}"] = base_x[i]
+                    st.session_state[f"custom_max_{i}"] = base_x[i]
+            
+            elif selected_preset == "📈 仅增不减":
+                for i in range(len(features)):
+                    st.session_state[f"custom_min_{i}"] = base_x[i]
+                    st.session_state[f"custom_max_{i}"] = base_x[i] * 2.0
+            
+            elif selected_preset == "⚖️ 灵活调整":
+                for i in range(len(features)):
+                    st.session_state[f"custom_min_{i}"] = base_x[i] * 0.5
+                    st.session_state[f"custom_max_{i}"] = base_x[i] * 1.5
+            
+            elif selected_preset == "📉 历史范围":
+                for i in range(len(features)):
+                    st.session_state[f"custom_min_{i}"] = max(0.0, X_train_min[i] if not np.isnan(X_train_min[i]) else base_x[i] * 0.5)
+                    st.session_state[f"custom_max_{i}"] = X_train_max[i] if not np.isnan(X_train_max[i]) else base_x[i] * 2.0
+            
+            # 非自定义模式时，重新运行以更新UI
+            if selected_preset != "✏️ 自定义":
+                st.rerun()
+        
+        st.markdown("---")
+        
+        # 显示当前约束预览
+        with st.expander("📋 当前约束范围预览", expanded=False):
+            preview_data = []
+            for i, feat in enumerate(features):
+                min_c = st.session_state[f"custom_min_{i}"]
+                max_c = st.session_state[f"custom_max_{i}"]
+                preview_data.append({
+                    "渠道": feat,
+                    "基准": f"{base_x[i]:.2f}",
+                    "最小值": f"{min_c:.2f}",
+                    "最大值": f"{max_c:.2f}",
+                    "可调范围": f"{((max_c - min_c) / base_x[i] * 100) if base_x[i] > 0 else 0:.0f}%"
+                })
+            st.dataframe(pd.DataFrame(preview_data), use_container_width=True, hide_index=True)
+        
+        st.markdown("**🎯 单独微调各渠道**")
+        if st.session_state["constraint_preset"] != "✏️ 自定义":
+            st.caption("展开渠道可查看或修改约束范围")
+        else:
+            st.caption("当前为自定义模式，所有约束值可自由设置")
+        
         min_constraints, max_constraints = [], []
-        cols = st.columns(2)
+        
         for i, feat in enumerate(features):
-            with cols[0]:
-                min_val = st.number_input(f"{feat} 最小值", value=float(max(0.0, base_x[i] * 0.5)), key=f"min_{i}")
-            with cols[1]:
-                max_val = st.number_input(
-                    f"{feat} 最大值",
-                    value=float(max(base_x[i] * 2.0, X_train_max[i] if not np.isnan(X_train_max[i]) else base_x[i] * 2.0)),
-                    key=f"max_{i}"
-                )
-            # 确保 min_val <= max_val
-            if min_val > max_val:
-                min_val, max_val = max_val, min_val
-            min_constraints.append(float(max(0.0, min_val)))
-            max_constraints.append(float(max(min_constraints[-1] + 0.01, max_val)))
+            with st.expander(f"🔧 {feat}", expanded=(st.session_state["constraint_preset"] == "✏️ 自定义" and i == 0)):
+                cols = st.columns([1, 1, 1])
+                with cols[0]:
+                    st.metric("基准投放", f"{base_x[i]:.2f}")
+                    if not np.isnan(X_train_min[i]) and not np.isnan(X_train_max[i]):
+                        st.caption(f"历史范围: [{X_train_min[i]:.1f}, {X_train_max[i]:.1f}]")
+                
+                with cols[1]:
+                    # 直接使用 custom_min_{i} 作为 key，实现联动
+                    min_val = st.number_input(
+                        "最小值", 
+                        value=float(st.session_state[f"custom_min_{i}"]),
+                        min_value=0.0,
+                        key=f"custom_min_{i}",
+                        help=f"渠道 {feat} 的投放量下限"
+                    )
+                
+                with cols[2]:
+                    # 确保最大值至少比最小值大 0.1
+                    current_max = float(st.session_state[f"custom_max_{i}"])
+                    safe_max = max(current_max, min_val + 0.1)
+                    if safe_max != current_max:
+                        st.session_state[f"custom_max_{i}"] = safe_max
+                    
+                    # 直接使用 custom_max_{i} 作为 key，实现联动
+                    max_val = st.number_input(
+                        "最大值",
+                        value=safe_max,
+                        min_value=min_val + 0.01,
+                        key=f"custom_max_{i}",
+                        help=f"渠道 {feat} 的投放量上限"
+                    )
+                
+                min_constraints.append(float(min_val))
+                max_constraints.append(float(max_val))
+    
+    else:  # 无约束
+        st.success("✅ 无约束模式：算法将自由寻找最优解")
+        min_constraints = None
+        max_constraints = None
 
     # ==============
     # 优化计算按钮
@@ -135,27 +316,46 @@ def page_reverse_opt(state):
                 # 计算目标达成率
                 target_achieved_ratio = y_pred_new / target_gmv if target_gmv != 0 else 0
                 
-                # 获取敏感度信息（从优化结果获取，避免重复计算）
-                from optimization import _robust_sensitivity_estimation
-                feature_names = getattr(model, 'feature_names_', [f'x{i}' for i in range(len(features))])
-                # 直接使用模型已计算的敏感度（缓存获取，速度快）
-                sensitivities = _robust_sensitivity_estimation(model, base_x, feature_names, X_train_min, X_train_max)
+                # V2 版本使用简单的敏感度估计（避免重复计算）
+                # 基于分配变化和预测变化的比率
+                sensitivities = np.abs((suggested - base_x)) / (abs(y_pred_new - float(model.predict([base_x])[0])) + 1e-8)
+                sensitivities = np.maximum(sensitivities, 0.01)  # 确保非零
 
                 # =============================
                 # 输出结果
                 # =============================
                 results = []
+                # 确保suggested、weights、sensitivities长度与features一致
+                n_features_actual = len(features)
+                suggested_safe = np.array(suggested)[:n_features_actual] if len(suggested) >= n_features_actual else np.pad(np.array(suggested), (0, n_features_actual - len(suggested)), mode='constant')
+                weights_safe = np.array(weights)[:n_features_actual] if len(weights) >= n_features_actual else np.pad(np.array(weights), (0, n_features_actual - len(weights)), mode='constant')
+                sensitivities_safe = np.array(sensitivities)[:n_features_actual] if len(sensitivities) >= n_features_actual else np.pad(np.array(sensitivities), (0, n_features_actual - len(sensitivities)), mode='constant')
+                
+                # 规范化constraint_status列表长度
+                constraint_status_safe = constraint_status
+                if constraint_status and isinstance(constraint_status, (list, tuple)):
+                    constraint_status_safe = list(constraint_status)[:n_features_actual] + ['正常'] * max(0, n_features_actual - len(constraint_status))
+                
                 for i, feat in enumerate(features):
-                    base_val = float(base_x[i])
-                    sug = float(suggested[i])
+                    if i >= len(suggested_safe):
+                        break
+                    base_val = float(base_x[i]) if i < len(base_x) else 0.0
+                    sug = float(suggested_safe[i])
+                    # 安全访问constraint_status，避免索引越界
+                    constraint_info = "正常"
+                    if constraint_status_safe and isinstance(constraint_status_safe, (list, tuple)) and i < len(constraint_status_safe):
+                        constraint_info = constraint_status_safe[i]
+                    elif constraint_status_safe and isinstance(constraint_status_safe, dict) and feat in constraint_status_safe:
+                        constraint_info = constraint_status_safe[feat]
+                    
                     results.append({
                         "渠道": feat,
                         "基准投放": base_val,
                         "建议投放": sug,
                         "增量": sug - base_val,
-                        "SHAP权重": float(weights[i]),
-                        "敏感度": float(sensitivities[i]),
-                        "约束状态": constraint_status[i] if constraint_status else "正常"
+                        "SHAP权重": float(weights_safe[i]) if i < len(weights_safe) else 0.0,
+                        "敏感度": float(sensitivities_safe[i]) if i < len(sensitivities_safe) else 0.0,
+                        "约束状态": constraint_info
                     })
 
                 st.session_state["reverse_results"] = results
@@ -166,9 +366,51 @@ def page_reverse_opt(state):
                 fmt = format_dataframe_numeric(results_df)
 
                 st.markdown(f"### 建议方案")
+                
+                # === 显示警告信息 ===
+                warnings = optimization_result.get('warnings', [])
+                if warnings:
+                    for warning in warnings:
+                        severity = warning.get('severity', 'low')
+                        message = warning.get('message', '')
+                        suggestion = warning.get('suggestion', '')
+                        
+                        if severity == 'high':
+                            st.error(f"{message}\n\n💡 {suggestion}")
+                        elif severity == 'medium':
+                            st.warning(f"{message}\n\n💡 {suggestion}")
+                        else:
+                            st.info(f"{message}\n\n💡 {suggestion}")
+                
+                # === 显示投入产出分析 ===
                 if y_pred_new is not None:
-                    st.success(f"预测 {state.get('model_target','目标')}: {safe_format(y_pred_new, '.2f')}（目标：{safe_format(target_gmv, '.2f')}，达成率：{safe_format(target_achieved_ratio * 100, '.1f')}%）")
-                    # st.caption(f"使用的优化方法: {method_used} (鲁棒性级别: {robustness_level})")
+                    # 主要结果
+                    adjusted_target = optimization_result.get('adjusted_target')
+                    if adjusted_target is not None:
+                        st.info(f"💡 目标已优化调整：{safe_format(target_gmv, '.2f')} → {safe_format(adjusted_target, '.2f')}（基于模型响应曲线的保守估计，实际可能略高）")
+                        st.success(f"预测 {state.get('model_target','目标')}: {safe_format(y_pred_new, '.2f')}（调整后目标：{safe_format(adjusted_target, '.2f')}，达成率：{safe_format(y_pred_new/adjusted_target * 100, '.1f')}%）")
+                    else:
+                        st.success(f"预测 {state.get('model_target','目标')}: {safe_format(y_pred_new, '.2f')}（目标：{safe_format(target_gmv, '.2f')}，达成率：{safe_format(target_achieved_ratio * 100, '.1f')}%）")
+                    
+                    # 投入产出分析
+                    budget_change_pct = optimization_result.get('budget_change_pct', 0)
+                    output_change_pct = optimization_result.get('output_change_pct', 0)
+                    roi = optimization_result.get('roi', 0)
+                    marginal_efficiency = optimization_result.get('marginal_efficiency', 0)
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("投放变化", f"{budget_change_pct:+.1f}%")
+                    with col2:
+                        st.metric("产出变化", f"{output_change_pct:+.1f}%")
+                    with col3:
+                        st.metric("ROI", f"{roi:.3f}")
+                    with col4:
+                        efficiency_icon = "✅" if marginal_efficiency >= 0.5 else ("⚠️" if marginal_efficiency >= 0.3 else "❌")
+                        st.metric("边际效率", f"{efficiency_icon} {marginal_efficiency:.2f}")
+                    
+                    st.caption(f"💡 边际效率 = 产出增长率 / 投放增长率。≥0.5为优秀，0.3-0.5为合格，<0.3需要重新评估目标")
+                    
                 else:
                     st.warning("建议方案预测值不可用。")
 
@@ -186,7 +428,7 @@ def page_reverse_opt(state):
                     target_gmv = st.session_state["reverse_target_gmv"]
 
                     st.subheader("📊 模型响应分析")
-                    scales = np.linspace(0.5, 2.5, 30)
+                    scales = np.linspace(0.5, 2.5, 50)  # 增加采样点，曲线更平滑
                     y_preds = []
 
                     for scale in scales:
@@ -199,38 +441,159 @@ def page_reverse_opt(state):
 
                     fig = make_subplots(
                         rows=1, cols=2,
-                        column_widths=[0.45, 0.55],
-                        subplot_titles=("整体投放响应曲线", "基准 vs 建议投放量")
+                        column_widths=[0.48, 0.52],
+                        subplot_titles=(
+                            "📈 整体投放响应曲线",
+                            "📊 渠道建议对比"
+                        ),
+                        horizontal_spacing=0.15
                     )
 
+                    # =========== 左图：响应曲线（清新简约） ===========
                     fig.add_trace(
-                        go.Scatter(x=scales, y=y_preds, mode='lines+markers',
-                                   name='预测', line=dict(color="#2E86DE", width=3)),
+                        go.Scatter(
+                            x=scales, 
+                            y=y_preds, 
+                            mode='lines',
+                            name='响应曲线',
+                            line=dict(color="#3498DB", width=2.5, shape='spline'),
+                            fill='tozeroy',
+                            fillcolor='rgba(52, 152, 219, 0.15)',
+                            hovertemplate='<b>投放倍数</b>: %{x:.2f}x<br><b>预测值</b>: %{y:.2f}<extra></extra>'
+                        ),
                         row=1, col=1
                     )
-                    fig.add_hline(y=y_base, line=dict(color="gray", dash="dot"),
-                                  annotation_text="基准", row=1, col=1)
-                    fig.add_hline(y=target_gmv, line=dict(color="red", dash="dash"),
-                                  annotation_text="目标", row=1, col=1)
-                    fig.update_xaxes(title_text="投放倍数（相对基准）", row=1, col=1)
-                    fig.update_yaxes(title_text="预测", row=1, col=1)
+                    
+                    # 基准线（虚线）
+                    fig.add_hline(
+                        y=y_base, 
+                        line=dict(color="#95A5A6", width=1.5, dash="dash"),
+                        row=1, col=1
+                    )
+                    fig.add_annotation(
+                        x=0.55, y=y_base,
+                        text=f"基准: {y_base:.1f}",
+                        showarrow=False,
+                        font=dict(size=10, color="#7F8C8D"),
+                        bgcolor="rgba(255,255,255,0.7)",
+                        bordercolor="#95A5A6",
+                        borderwidth=1,
+                        borderpad=4,
+                        xref="x", yref="y",
+                        row=1, col=1
+                    )
+                    
+                    # 目标线（粗实线，突出重点）
+                    fig.add_hline(
+                        y=target_gmv, 
+                        line=dict(color="#E74C3C", width=2.5),
+                        row=1, col=1
+                    )
+                    fig.add_annotation(
+                        x=0.55, y=target_gmv,
+                        text=f"目标: {target_gmv:.1f}",
+                        showarrow=False,
+                        font=dict(size=10, color="#C0392B", family="Arial Black"),
+                        bgcolor="rgba(255,255,255,0.8)",
+                        bordercolor="#E74C3C",
+                        borderwidth=1.5,
+                        borderpad=4,
+                        xref="x", yref="y",
+                        row=1, col=1
+                    )
+                    
+                    fig.update_xaxes(
+                        title_text="投放倍数 (相对基准值)",
+                        showgrid=True,
+                        gridwidth=0.5,
+                        gridcolor='rgba(200, 200, 200, 0.3)',
+                        zeroline=False,
+                        row=1, col=1
+                    )
+                    fig.update_yaxes(
+                        title_text="模型预测值",
+                        showgrid=True,
+                        gridwidth=0.5,
+                        gridcolor='rgba(200, 200, 200, 0.3)',
+                        zeroline=False,
+                        row=1, col=1
+                    )
 
+                    # =========== 右图：柱状图对比（清新简约） ===========
                     fig.add_trace(
-                        go.Bar(name='基准', x=features, y=[r["基准投放"] for r in results], marker_color='#82CAFA'),
+                        go.Bar(
+                            name='基准投放',
+                            x=features,
+                            y=[r["基准投放"] for r in results],
+                            marker=dict(
+                                color='#3498DB',
+                                opacity=0.7,
+                                line=dict(color='white', width=0)
+                            ),
+                            hovertemplate='<b>%{x}</b><br>基准: %{y:.2f}<extra></extra>'
+                        ),
                         row=1, col=2
                     )
                     fig.add_trace(
-                        go.Bar(name='建议', x=features, y=[r["建议投放"] for r in results], marker_color='#FFB347'),
+                        go.Bar(
+                            name='建议投放',
+                            x=features,
+                            y=[r["建议投放"] for r in results],
+                            marker=dict(
+                                color='#2ECC71',
+                                opacity=0.8,
+                                line=dict(color='white', width=0)
+                            ),
+                            hovertemplate='<b>%{x}</b><br>建议: %{y:.2f}<extra></extra>'
+                        ),
                         row=1, col=2
                     )
+                    
+                    fig.update_xaxes(
+                        title_text="渠道",
+                        showgrid=False,
+                        row=1, col=2
+                    )
+                    fig.update_yaxes(
+                        title_text="投放量",
+                        showgrid=True,
+                        gridwidth=0.5,
+                        gridcolor='rgba(200, 200, 200, 0.3)',
+                        zeroline=False,
+                        row=1, col=2
+                    )
+
+                    # =========== 整体样式（清新简约） ===========
                     fig.update_layout(
                         barmode='group',
-                        title='模型响应与反推投放对比',
-                        plot_bgcolor="rgba(0,0,0,0)",
-                        paper_bgcolor="rgba(0,0,0,0)",
-                        font=dict(color="#E6F0F8"),
-                        height=500
+                        title=dict(
+                            text='模型响应分析与投放优化方案',
+                            font=dict(size=16, color="#2C3E50", family="Arial"),
+                            x=0.5,
+                            xanchor='center',
+                            y=0.98,
+                            yanchor='top'
+                        ),
+                        plot_bgcolor="white",
+                        paper_bgcolor="white",
+                        font=dict(color="#34495E", size=11, family="Arial"),
+                        height=480,
+                        showlegend=True,
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=-0.18,
+                            xanchor="center",
+                            x=0.5,
+                            bgcolor="rgba(255,255,255,0.8)",
+                            bordercolor="#BDC3C7",
+                            borderwidth=0.5,
+                            font=dict(size=10)
+                        ),
+                        hovermode='x unified',
+                        margin=dict(t=60, b=100, l=70, r=20)
                     )
+                    
                     st.plotly_chart(fig, use_container_width=True)
 
             except Exception as e:
