@@ -298,8 +298,8 @@ def optimize_allocation_v2(model, base_x, y_target,
         'robustness_level': 'high'
     }
 
-
-# ==========================================
+ 
+# ===========================================
 # 兼容性接口（可以直接替换原有函数）
 # ==========================================
 def optimize_ad_allocation_robust(model, base_x, y_target,
