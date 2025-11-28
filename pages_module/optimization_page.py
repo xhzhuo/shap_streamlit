@@ -13,7 +13,7 @@ from optimization import optimize_ad_allocation_robust
 
 
 def page_reverse_opt(state):
-    """反推与预算优化页面（智能单入口版）"""
+    """反推与预算优化页面(智能单入口版)"""
     st.header("🔁 反推与预算优化")
 
     if state.get('model') is None:
@@ -33,7 +33,77 @@ def page_reverse_opt(state):
     except Exception:
         y_base = 0.0
 
+    # === 使用提醒卡片 ===
+    with st.expander("💡 反推优化适用标准", expanded=False):
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("""
+                <div style="
+                    background: white;
+                    border-left: 4px solid #22c55e;
+                    border-radius: 8px;
+                    padding: 15px;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+                ">
+                    <div style="font-size: 18px; margin-bottom: 8px;">✅ 特征可控</div>
+                    <div style="font-size: 13px; color: #555; line-height: 1.6;">
+                        <b>可以直接调整的特征：</b><br>
+                        • 投放金额<br>
+                        • 渠道分配<br>
+                        • 产品价格<br><br>
+                        <b style="color: #ef4444;">不可控的特征：</b><br>
+                        • 曝光数、点击数<br>
+                        • 天气、节假日<br>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown("""
+                <div style="
+                    background: white;
+                    border-left: 4px solid #3b82f6;
+                    border-radius: 8px;
+                    padding: 15px;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+                ">
+                    <div style="font-size: 18px; margin-bottom: 8px;">✅ 因果直接</div>
+                    <div style="font-size: 13px; color: #555; line-height: 1.6;">
+                        <b>直接因果关系：</b><br>
+                        • 投放金额 → 转化数<br>
+                        • 价格 → 销量<br>
+                        • 内容类型 → 阅读量<br><br>
+                        <b style="color: #f97316;">间接因果关系：</b><br>
+                        • 投放 → 曝光 → 转化<br>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        with col3:
+            st.markdown("""
+                <div style="
+                    background: white;
+                    border-left: 4px solid #8b5cf6;
+                    border-radius: 8px;
+                    padding: 15px;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+                ">
+                    <div style="font-size: 18px; margin-bottom: 8px;">✅ 结果可执行</div>
+                    <div style="font-size: 13px; color: #555; line-height: 1.6;">
+                        <b>可以立即执行：</b><br>
+                        • 调整投放预算<br>
+                        • 修改产品价格<br>
+                        • 改变内容策略<br><br>
+                        <b style="color: #ef4444;">无法执行：</b><br>
+                        • "调整曝光数"<br>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+
+
     st.markdown(f"基准预测 {state.get('model_target','目标')}: **{safe_format(y_base, '.2f')}**")
+
 
     # ==============
     # 参数输入区域

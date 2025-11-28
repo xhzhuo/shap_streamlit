@@ -103,6 +103,122 @@ def _estimate_jacobian_fast(model, x, eps=0.02):
     return jacobian, preds[0]
 
 
+def _detect_nonlinearity(model, base_x, jacobian, eps=0.1):
+    """
+    检测模型非线性程度
+    
+    原理：测试模型在不同点的响应是否与线性预测一致
+    - 线性模型：梯度恒定，delta_y ≈ J·delta_x
+    - 非线性模型：梯度变化，实际变化 ≠ 线性预测
+    
+    Parameters
+    ----------
+    model : 训练好的模型
+    base_x : 基准点
+    jacobian : 在base_x处的雅可比（梯度）
+    eps : 测试扰动幅度（默认0.1，即10%）
+    
+    Returns
+    -------
+    float : 非线性指标（0=完全线性，>0.3表示强非线性）
+    """
+    base_x = np.asarray(base_x, dtype=np.float32).ravel()
+    jacobian = np.asarray(jacobian, dtype=np.float32).ravel()
+    
+    # 获取基准预测值
+    y_base = _safe_predict(model, base_x)
+    
+    # 测试点1：沿梯度方向移动
+    direction = jacobian / (np.linalg.norm(jacobian) + 1e-8)
+    x_forward = base_x + eps * np.linalg.norm(base_x) * direction
+    x_backward = base_x - eps * np.linalg.norm(base_x) * direction
+    
+    # 实际预测
+    y_forward = _safe_predict(model, x_forward)
+    y_backward = _safe_predict(model, x_backward)
+    
+    # 线性预测（基于梯度）
+    delta_x_forward = x_forward - base_x
+    delta_x_backward = x_backward - base_x
+    
+    linear_pred_forward = y_base + np.dot(jacobian, delta_x_forward)
+    linear_pred_backward = y_base + np.dot(jacobian, delta_x_backward)
+    
+    # 计算非线性指标：实际变化与线性预测的相对误差
+    actual_change = abs(y_forward - y_backward)
+    linear_change = abs(linear_pred_forward - linear_pred_backward)
+    
+    if linear_change < 1e-8:
+        return 0.0  # 几乎无变化，认为是线性
+    
+    nonlinearity = abs(actual_change - linear_change) / (linear_change + 1e-8)
+    
+    return float(nonlinearity)
+
+
+def _optimize_with_scipy(model, base_x, y_target, min_constraints, max_constraints, 
+                         X_train_max, max_iterations=50):
+    """
+    使用SciPy优化器进行全局优化（用于非线性模型）
+    
+    Parameters
+    ----------
+    model : 训练好的模型
+    base_x : 初始点（从线性求解得到）
+    y_target : 目标值
+    min_constraints, max_constraints : 约束
+    X_train_max : 训练数据最大值
+    max_iterations : 最大迭代次数
+    
+    Returns
+    -------
+    ndarray : 优化后的分配方案
+    """
+    from scipy.optimize import minimize
+    
+    base_x = np.asarray(base_x, dtype=np.float32).ravel()
+    n = len(base_x)
+    
+    # 定义目标函数：最小化预测值与目标的平方误差
+    def objective(x):
+        try:
+            y_pred = _safe_predict(model, x, use_cache=False)
+            return (y_pred - y_target) ** 2
+        except Exception:
+            return 1e10  # 预测失败，返回大惩罚
+    
+    # 设置边界约束
+    bounds = []
+    for i in range(n):
+        if min_constraints is not None and max_constraints is not None:
+            lb = float(min_constraints[i]) if i < len(min_constraints) else 0.0
+            ub = float(max_constraints[i]) if i < len(max_constraints) else base_x[i] * 3
+        else:
+            lb = 0.0
+            ub = base_x[i] * 3 if X_train_max is None else float(X_train_max[i])
+        
+        bounds.append((lb, ub))
+    
+    # 使用L-BFGS-B优化器（适合有界约束的问题）
+    try:
+        result = minimize(
+            objective,
+            x0=base_x,
+            method='L-BFGS-B',
+            bounds=bounds,
+            options={'maxiter': max_iterations, 'ftol': 1e-6}
+        )
+        
+        if result.success or result.fun < (y_target * 0.05) ** 2:  # 误差<5%认为成功
+            return result.x
+        else:
+            # 优化失败，返回初始值
+            return base_x
+    except Exception:
+        return base_x
+
+
+
 def _direct_linear_solve(model, base_x, y_base, y_target, weights, 
                          min_constraints, max_constraints, X_train_max):
     """
@@ -146,36 +262,49 @@ def _direct_linear_solve(model, base_x, y_base, y_target, weights,
     # 目标差距
     delta_y = y_target - y_current
     
-    # ===== 数学正确的线性分配法 =====
-    # 理论基础：一阶泰勒展开 y ≈ y₀ + J·Δx
-    # 其中 J = [∂y/∂x₁, ∂y/∂x₂, ..., ∂y/∂xₙ] 是雅可比向量
+    # ===== 正确的线性分配法（基于一阶泰勒展开）=====
+    # 理论基础：一阶泰勒展开 δy ≈ J·Δx
+    # 其中 J = [∂y/∂x₁, ∂y/∂x₂, ..., ∂y/∂xₙ] 是雅可比向量（梯度）
     
-    # 方法：按权重分配变化量，使得 J·Δx ≈ delta_y
+    # 目标：找到 Δx 使得 J·Δx = delta_y，同时考虑权重
+    # 
+    # 数学推导：
+    # 如果不考虑权重，最小化 ||Δx||² 的解析解为：
+    #   Δx = (delta_y / ||J||²) * J
+    # 
+    # 如果考虑SHAP权重（重要的特征应该调整更多），使用加权分配：
+    #   Δx_i = w_i^p * J_i * [delta_y / Σ(w_j^p * J_j²)]
+    # 其中 p=1.5（平衡重要性和多样性，避免过度集中）
+    # 使用 w^1.5 而非 w²：w²过于激进，会导致单一渠道占比过高
+    # 这相当于最小化 Σ[(Δx_i / w_i^0.75)²]，即重要特征允许更大变化但不过度
     
-    # 1. 归一化雅可比向量（避免数值问题）
-    jacobian_abs = np.abs(jacobian)
-    jacobian_normalized = jacobian / (np.max(jacobian_abs) + 1e-8)
+    # 1. 计算加权雅可比
+    # 权重策略：w^1.5（更温和的分配，避免过度集中）
+    # w^2.0：过于激进，重要渠道占比过高
+    # w^1.5：平衡，既尊重SHAP重要性，又保持多样性
+    # w^1.0：均匀，忽略SHAP重要性
+    weight_power = 1.5  # 可根据业务需求调整（1.0-2.0）
+    weighted_jacobian = (weights ** weight_power) * jacobian
     
-    # 2. 计算加权雅可比（权重控制分配比例）
-    # w_i 越大，说明该特征越重要，应该调整得更多
-    weighted_jacobian = jacobian_normalized * weights
+    # 2. 计算分母：Σ(w_i^p * J_i²)
+    # 注意：这里是 w^p*J 与 J 的点积，等价于 Σ(w_i^1.5 * J_i²)
+    denominator = np.dot(weighted_jacobian, jacobian)
     
-    # 3. 计算步长（使得 weighted_J·Δx ≈ delta_y）
-    # 如果设 Δx = α * weighted_J，则：
-    # weighted_J·(α * weighted_J) = delta_y
-    # α * ||weighted_J||² = delta_y
-    # α = delta_y / ||weighted_J||²
-    weighted_norm_sq = np.dot(weighted_jacobian, weighted_jacobian)
-    
-    if weighted_norm_sq > 1e-12:
-        # 正常情况：使用解析解
-        alpha = delta_y / weighted_norm_sq
-        delta_x = alpha * weighted_jacobian
+    if abs(denominator) > 1e-12:
+        # 正常情况：使用正确的解析解
+        # Δx_i = w_i^p * J_i * [delta_y / Σ(w_j^p * J_j²)]
+        # 当前 p=1.5
+        delta_x = weighted_jacobian * (delta_y / denominator)
     else:
-        # 雅可比太小（几乎不敏感）：使用简单线性分配
-        # Δx_i = w_i * total_change，其中 total_change 使得 sum(J_i * Δx_i) ≈ delta_y
-        total_change = delta_y / (np.sum(jacobian * weights) + 1e-8)
-        delta_x = weights * total_change
+        # 雅可比太小（模型对输入几乎不敏感）：使用简单加权分配
+        # Δx_i = w_i * total_change，其中 total_change 使得 Σ(J_i * Δx_i) ≈ delta_y
+        avg_jacobian = np.sum(jacobian * weights)
+        if abs(avg_jacobian) > 1e-12:
+            total_change = delta_y / avg_jacobian
+            delta_x = weights * total_change
+        else:
+            # 极端情况：模型完全不敏感，均匀分配
+            delta_x = np.ones(n) * (delta_y / n)
     
     # 4. 自适应信赖域（限制变化幅度）
     # 根据变化量的大小动态调整信赖域
@@ -485,18 +614,37 @@ def optimize_allocation_v2(model, base_x, y_target,
     else:
         y_target_adjusted = y_target
     
-    # === 步骤2：优化求解 ===
+    # === 步骤2：非线性检测与自适应策略调整 ===
+    # 检测模型非线性程度，动态调整优化策略
+    jacobian_initial, _ = _estimate_jacobian_fast(model, base_x)
+    nonlinearity_score = _detect_nonlinearity(model, base_x, jacobian_initial)
+    
+    # 根据非线性程度调整策略
+    if nonlinearity_score < 0.2:
+        # 弱非线性：使用默认策略
+        adaptive_max_iterations = max_iterations
+        use_scipy_fallback = False
+    elif nonlinearity_score < 0.4:
+        # 中等非线性：增加迭代次数
+        adaptive_max_iterations = max_iterations + 2
+        use_scipy_fallback = True
+    else:
+        # 强非线性：显著增加迭代，准备SciPy兜底
+        adaptive_max_iterations = max_iterations + 3
+        use_scipy_fallback = True
+    
+    # === 步骤3：优化求解（快速线性方法）===
     suggested = _direct_linear_solve(
         model, base_x, y_base, y_target_adjusted, weights,
         min_constraints, max_constraints, X_train_max
     )
     
-    # 自适应迭代精调（如果需要）
+    # 自适应迭代精调（使用根据非线性程度调整的迭代次数）
     best_suggested = suggested.copy()
     y_pred = _safe_predict(model, suggested)
     best_error = abs(y_pred - y_target_adjusted)
     
-    for iteration in range(max_iterations - 1):
+    for iteration in range(adaptive_max_iterations - 1):
         # 检查是否已收敛
         relative_error = abs(y_pred - y_target_adjusted) / max(abs(y_target_adjusted), 1.0)
         if relative_error < tolerance:
@@ -515,6 +663,27 @@ def optimize_allocation_v2(model, base_x, y_target,
         if error < best_error:
             best_error = error
             best_suggested = suggested.copy()
+    
+    # ===== 步骤4：混合优化策略（SciPy兜底）=====
+    # 如果快速方法误差仍然较大且模型非线性强，使用SciPy精调
+    final_relative_error = best_error / max(abs(y_target_adjusted), 1.0)
+    
+    if use_scipy_fallback and final_relative_error > 0.05:  # 误差>5%时启用
+        # 使用SciPy全局优化（以快速方法的结果为起点）
+        scipy_suggested = _optimize_with_scipy(
+            model, best_suggested, y_target_adjusted,
+            min_constraints, max_constraints, X_train_max,
+            max_iterations=30
+        )
+        
+        # 检查SciPy是否真的改进了结果
+        y_scipy = _safe_predict(model, scipy_suggested)
+        scipy_error = abs(y_scipy - y_target_adjusted)
+        
+        if scipy_error < best_error:
+            # SciPy更好，采用其结果
+            best_suggested = scipy_suggested
+            best_error = scipy_error
     
     # 最终结果
     suggested, constraint_status = _apply_constraints(
@@ -652,18 +821,23 @@ def optimize_allocation_v2(model, base_x, y_target,
         'warnings': _generate_warnings(
             target_feasible, efficiency_reasonable, 
             original_target, y_max_possible, y_final,
-            budget_change_pct, output_change_pct
+            budget_change_pct, output_change_pct,
+            min_constraints, max_constraints
         )
     }
 
 
 def _generate_warnings(target_feasible, efficiency_reasonable,
                        original_target, y_max_possible, y_final,
-                       budget_change_pct, output_change_pct):
+                       budget_change_pct, output_change_pct,
+                       min_constraints=None, max_constraints=None):
     """生成优化警告信息"""
     warnings = []
     
     marginal_eff = output_change_pct / budget_change_pct if abs(budget_change_pct) > 1e-6 else 0
+    
+    # 判断是否是无约束模式
+    is_unconstrained = (min_constraints is None and max_constraints is None)
     
     if not target_feasible:
         gap = original_target - y_final
@@ -677,7 +851,14 @@ def _generate_warnings(target_feasible, efficiency_reasonable,
         else:
             severity = 'medium'
             message = f'⚠️ 目标 {original_target:.0f} 较高，当前达到 {y_final:.0f}（差距 {gap_pct:.1f}%）'
-            suggestion = f'根据模型响应曲线和投入产出分析，当前方案已接近最优平衡点。如需更高产出，可能需要：(1) 放宽约束条件；(2) 增加可调配预算；(3) 优化模型质量。'
+            
+            # 根据约束模式给出不同的建议
+            if is_unconstrained:
+                # 无约束模式：不建议调整约束或预算
+                suggestion = f'根据模型响应曲线分析，当前方案已接近最优平衡点。如需更高产出，建议：(1) 重新评估目标合理性；(2) 优化模型质量（增加训练数据、特征工程等）；(3) 探索新的营销渠道。'
+            else:
+                # 有约束模式：可以建议放宽约束
+                suggestion = f'根据模型响应曲线和投入产出分析，当前方案已接近最优平衡点。如需更高产出，可能需要：(1) 放宽约束条件；(2) 增加可调配预算；(3) 优化模型质量。'
         
         warnings.append({
             'type': 'target_infeasible',
@@ -704,11 +885,19 @@ def _generate_warnings(target_feasible, efficiency_reasonable,
         })
     
     if abs(y_final - original_target) / max(abs(original_target), 1.0) > 0.2:
+        # 根据约束模式给出不同的建议
+        if is_unconstrained:
+            # 无约束模式：建议重新评估目标
+            suggestion = '建议重新评估目标合理性，或优化模型以提升预测能力'
+        else:
+            # 有约束模式：可以建议调整约束或预算
+            suggestion = '可能需要调整约束条件或增加可调配预算'
+        
         warnings.append({
             'type': 'large_gap',
             'severity': 'low',
             'message': f'💡 实际预测值 {y_final:.0f} 与目标 {original_target:.0f} 差距较大',
-            'suggestion': '可能需要调整约束条件或增加可调配预算'
+            'suggestion': suggestion
         })
     
     return warnings

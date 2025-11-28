@@ -82,28 +82,120 @@ def page_train_and_eval(state):
 
     st.markdown("---")
     st.markdown("### 模型训练")
+    
+    # === 参数调优选项 ===
+    enable_tuning = st.checkbox(
+        "🔧 启用智能参数调优",
+        value=False,
+        help="自动搜索最优RandomForest参数，可提升5-15%性能"
+    )
+    
     run = st.button("🚀 训练模型")
 
     if run:
         if len(selected_features) == 0:
             st.warning("请至少选择一个特征。")
             return
-        with st.spinner("模型训练中..."):
-            try:
-                model, X_train, X_test, y_train, y_test = train_model(
-                    df, selected_features, target, n_estimators=200, random_state=42
-                )
-                metrics = metrics_for_model(model, X_train, X_test, y_train, y_test)
-                state.update({
-                    "model": model, "metrics": metrics,
-                    "model_features": selected_features, "model_target": target,
-                    "X_train": X_train, "X_test": X_test,
-                    "y_train": y_train, "y_test": y_test,
-                    "df": df
-                })
-                st.success("✅ 模型训练完成")
-            except Exception as e:
-                st.error(f"训练失败: {e}")
+        
+        if enable_tuning:
+            # === 参数调优模式 ===
+            with st.spinner("🔧 正在进行参数调优，请稍候..."):
+                try:
+                    import time
+                    from utils import train_model_with_tuning
+                    
+                    start_time = time.time()
+                    
+                    # 执行参数调优（使用默认参数：50次迭代，5折交叉验证）
+                    tuning_result = train_model_with_tuning(
+                        df, selected_features, target,
+                        n_iter=50,
+                        cv_folds=5,
+                        random_state=42,
+                        n_jobs=-1
+                    )
+                    
+                    elapsed_time = time.time() - start_time
+                    
+                    # 提取结果
+                    model = tuning_result['best_model']
+                    X_train = tuning_result['X_train']
+                    X_test = tuning_result['X_test']
+                    y_train = tuning_result['y_train']
+                    y_test = tuning_result['y_test']
+                    
+                    # 计算指标
+                    metrics = metrics_for_model(model, X_train, X_test, y_train, y_test)
+                    
+                    # 提取性能数据
+                    default_score = tuning_result['default_score']
+                    tuned_score = metrics['test_r2']
+                    
+                    # 保存到state
+                    state.update({
+                        "model": model,
+                        "metrics": metrics,
+                        "model_features": selected_features,
+                        "model_target": target,
+                        "X_train": X_train,
+                        "X_test": X_test,
+                        "y_train": y_train,
+                        "y_test": y_test,
+                        "df": df,
+                        "tuning_enabled": True,
+                        "best_params": tuning_result['best_params'],
+                        "default_score": default_score,
+                        "tuned_score": tuned_score,
+                        "tuning_time": elapsed_time
+                    })
+                    
+                    # 计算性能提升
+                    improvement = ((tuned_score - default_score) / default_score * 100) if default_score > 0 else 0
+                    
+                    if improvement > 0:
+                        st.success(f"✅ 参数调优完成！性能提升 {improvement:.1f}% (默认R²: {default_score:.4f} → 调优R²: {tuned_score:.4f})")
+                    else:
+                        st.success(f"✅ 参数调优完成！(R²: {tuned_score:.4f})")
+                    
+                except Exception as e:
+                    st.error(f"参数调优失败: {e}")
+                    st.info("正在使用默认参数训练模型...")
+                    # 回退到默认训练
+                    try:
+                        model, X_train, X_test, y_train, y_test = train_model(
+                            df, selected_features, target, n_estimators=200, random_state=42
+                        )
+                        metrics = metrics_for_model(model, X_train, X_test, y_train, y_test)
+                        state.update({
+                            "model": model, "metrics": metrics,
+                            "model_features": selected_features, "model_target": target,
+                            "X_train": X_train, "X_test": X_test,
+                            "y_train": y_train, "y_test": y_test,
+                            "df": df,
+                            "tuning_enabled": False
+                        })
+                        st.success("✅ 模型训练完成（使用默认参数）")
+                    except Exception as e2:
+                        st.error(f"训练失败: {e2}")
+        else:
+            # === 默认训练模式 ===
+            with st.spinner("模型训练中..."):
+                try:
+                    model, X_train, X_test, y_train, y_test = train_model(
+                        df, selected_features, target, n_estimators=200, random_state=42
+                    )
+                    metrics = metrics_for_model(model, X_train, X_test, y_train, y_test)
+                    state.update({
+                        "model": model, "metrics": metrics,
+                        "model_features": selected_features, "model_target": target,
+                        "X_train": X_train, "X_test": X_test,
+                        "y_train": y_train, "y_test": y_test,
+                        "df": df,
+                        "tuning_enabled": False
+                    })
+                    st.success("✅ 模型训练完成")
+                except Exception as e:
+                    st.error(f"训练失败: {e}")
 
     if state.get("metrics"):
         m = state["metrics"]

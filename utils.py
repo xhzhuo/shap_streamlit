@@ -63,6 +63,108 @@ def train_model(df, features, target, n_estimators=200, random_state=42):
     return model, X_train, X_test, y_train, y_test
 
 
+def train_model_with_tuning(df, features, target, 
+                            n_iter=50, 
+                            cv_folds=5,
+                            random_state=42,
+                            n_jobs=-1):
+    """
+    训练带参数调优的随机森林模型（使用RandomizedSearchCV）
+    
+    Parameters
+    ----------
+    df : DataFrame
+        训练数据
+    features : list
+        特征列名列表
+    target : str
+        目标变量列名
+    n_iter : int, default=50
+        随机搜索的迭代次数（尝试的参数组合数）
+    cv_folds : int, default=5
+        交叉验证折数
+    random_state : int, default=42
+        随机种子
+    n_jobs : int, default=-1
+        并行作业数（-1表示使用所有CPU核心）
+    
+    Returns
+    -------
+    dict : {
+        'best_model': 最优模型,
+        'best_params': 最优参数字典,
+        'best_score': 最优交叉验证分数,
+        'cv_results': 完整的搜索结果,
+        'X_train': 训练集特征,
+        'X_test': 测试集特征,
+        'y_train': 训练集目标,
+        'y_test': 测试集目标,
+        'default_score': 默认参数的分数（用于对比）
+    }
+    """
+    from sklearn.model_selection import RandomizedSearchCV
+    from scipy.stats import randint, uniform
+    
+    # 准备数据
+    X = df[features].astype(float)
+    y = df[target].astype(float)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=random_state
+    )
+    
+    # 定义参数搜索空间
+    param_distributions = {
+        'n_estimators': [100, 200, 300, 500],
+        'max_depth': [10, 15, 20, 25, 30, None],
+        'min_samples_split': [2, 5, 10, 15],
+        'min_samples_leaf': [1, 2, 4, 8],
+        'max_features': ['sqrt', 'log2', 0.3, 0.5],
+        'bootstrap': [True, False],
+    }
+    
+    # 创建基础模型
+    base_model = RandomForestRegressor(random_state=random_state, n_jobs=1)
+    
+    # 先训练一个默认参数的模型作为基准
+    default_model = RandomForestRegressor(n_estimators=200, random_state=random_state, n_jobs=-1)
+    default_model.fit(X_train, y_train)
+    default_score = default_model.score(X_test, y_test)
+    
+    # 创建随机搜索对象
+    random_search = RandomizedSearchCV(
+        estimator=base_model,
+        param_distributions=param_distributions,
+        n_iter=n_iter,
+        cv=cv_folds,
+        scoring='r2',
+        n_jobs=n_jobs,
+        random_state=random_state,
+        verbose=0,
+        return_train_score=True
+    )
+    
+    # 执行参数搜索
+    random_search.fit(X_train, y_train)
+    
+    # 获取最优模型（使用所有CPU核心重新训练）
+    best_params = random_search.best_params_
+    best_model = RandomForestRegressor(**best_params, random_state=random_state, n_jobs=-1)
+    best_model.fit(X_train, y_train)
+    
+    return {
+        'best_model': best_model,
+        'best_params': best_params,
+        'best_score': random_search.best_score_,
+        'cv_results': random_search.cv_results_,
+        'X_train': X_train,
+        'X_test': X_test,
+        'y_train': y_train,
+        'y_test': y_test,
+        'default_score': default_score,
+        'search_object': random_search
+    }
+
+
 def metrics_for_model(model, X_train, X_test, y_train, y_test):
     """计算模型评估指标"""
     y_train_pred = model.predict(X_train)
