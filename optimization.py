@@ -5,6 +5,7 @@
 2. 并行批量预测（减少模型调用次数）
 3. 智能缓存和预计算
 4. 自适应步长调整
+5. 自适应 SHAP 校准（新增）
 """
 
 import numpy as np
@@ -14,9 +15,27 @@ from typing import Optional, Tuple, Dict
 import warnings
 from collections import OrderedDict
 
+# SHAP 库导入（可选依赖）
+try:
+    import shap
+    import time
+    SHAP_AVAILABLE = True
+except ImportError:
+    SHAP_AVAILABLE = False
+    warnings.warn(
+        "shap 库未安装，SHAP 校准功能将不可用。\n"
+        "如需使用 SHAP 校准，请运行: pip install shap",
+        UserWarning
+    )
+
 # 全局缓存
 _PRED_CACHE = OrderedDict()
 _MAX_CACHE_SIZE = 10000
+
+# SHAP explainer 缓存（避免重复创建）
+_SHAP_EXPLAINER_CACHE = {}
+_SHAP_VALUES_CACHE = OrderedDict()
+_MAX_SHAP_CACHE_SIZE = 100
 
 def _hash_array(arr):
     """快速数组哈希"""
@@ -101,6 +120,150 @@ def _estimate_jacobian_fast(model, x, eps=0.02):
         jacobian[i] = (preds[2*i + 1] - preds[2*i + 2]) / (2 * h)
     
     return jacobian, preds[0]
+
+
+def _compute_shap_marginal(model, x, eps=0.02, feature_names=None):
+    """
+    计算单位化 SHAP 边际贡献（与雅可比量纲一致）
+    
+    Critical: 返回 (φ+ - φ-) / (2×delta)，NOT 原始 φ
+    这确保 SHAP 值与雅可比具有相同的量纲（单位变化率）
+    
+    Parameters
+    ----------
+    model : 训练好的模型
+    x : 基准点（1D array）
+    eps : 扰动幅度（必须与 _estimate_jacobian_fast 一致，默认 0.02）
+    feature_names : 特征名（可选）
+    
+    Returns
+    -------
+    dict : {
+        'shap_marginal': ndarray 或 None（单位化边际 SHAP）
+        'runtime_ms': float（计算时间）
+        'method': str（使用的 explainer 类型：'tree'/'kernel'）
+        'failure_reason': str 或 None（失败原因）
+        'scale_check_passed': bool（尺度验证是否通过）
+    }
+    """
+    if not SHAP_AVAILABLE:
+        return {
+            'shap_marginal': None,
+            'runtime_ms': 0,
+            'method': None,
+            'failure_reason': 'shap_library_not_installed',
+            'scale_check_passed': False
+        }
+    
+    start_time = time.time()
+    x = np.asarray(x, dtype=np.float32).ravel()
+    n = len(x)
+    
+    try:
+        # ===== 步骤1: 获取或创建 explainer（缓存优化）=====
+        model_id = id(model)
+        
+        if model_id not in _SHAP_EXPLAINER_CACHE:
+            # 尝试 TreeExplainer（快速，适合树模型）
+            try:
+                explainer = shap.TreeExplainer(model)
+                explainer_type = 'tree'
+            except Exception:
+                # 降级到 KernelExplainer（慢但通用）
+                try:
+                    def model_predict(X):
+                        return _batch_predict(model, X)
+                    
+                    # 使用当前点作为背景数据（简化）
+                    explainer = shap.KernelExplainer(model_predict, x.reshape(1, -1))
+                    explainer_type = 'kernel'
+                except Exception as e:
+                    return {
+                        'shap_marginal': None,
+                        'runtime_ms': (time.time() - start_time) * 1000,
+                        'method': None,
+                        'failure_reason': f'explainer_creation_failed: {str(e)[:100]}',
+                        'scale_check_passed': False
+                    }
+            
+            _SHAP_EXPLAINER_CACHE[model_id] = (explainer, explainer_type)
+        else:
+            explainer, explainer_type = _SHAP_EXPLAINER_CACHE[model_id]
+        
+        # ===== 步骤2: 构造扰动样本（批量计算优化）=====
+        X_batch = np.tile(x, (2*n + 1, 1)).astype(np.float32)  # [x, x+h1, x-h1, ...]
+        
+        for i in range(n):
+            h = max(abs(x[i]) * eps, eps)
+            X_batch[2*i + 1, i] += h  # x + h
+            X_batch[2*i + 2, i] -= h  # x - h
+        
+        # ===== 步骤3: 批量计算 SHAP 值 =====
+        if explainer_type == 'tree':
+            # TreeExplainer 返回 shap_values（可能是 list 或 array）
+            shap_result = explainer.shap_values(X_batch)
+            
+            # 处理多输出情况（分类模型）
+            if isinstance(shap_result, list):
+                # 取最后一个类别的 SHAP 值（通常是正类）
+                shap_values_batch = shap_result[-1]
+            else:
+                shap_values_batch = shap_result
+        else:
+            # KernelExplainer
+            shap_values_batch = explainer.shap_values(X_batch)
+        
+        # ===== 步骤4: 计算单位化边际 SHAP（Critical）=====
+        shap_marginal = np.zeros(n, dtype=np.float32)
+        
+        for i in range(n):
+            h = max(abs(x[i]) * eps, eps)
+            
+            # 获取 x+h 和 x-h 的 SHAP 值
+            phi_plus = shap_values_batch[2*i + 1]   # shape: (n,)
+            phi_minus = shap_values_batch[2*i + 2]  # shape: (n,)
+            
+            # 单位化边际：(φ+[i] - φ-[i]) / (2h)
+            # 注意：只取第 i 个特征的 SHAP 变化（对角元素）
+            shap_marginal[i] = (phi_plus[i] - phi_minus[i]) / (2 * h)
+        
+        # ===== 步骤5: 尺度验证（Critical）=====
+        shap_norm = np.linalg.norm(shap_marginal)
+        
+        # 验证 SHAP 是否异常（NaN/Inf/全零）
+        scale_check_passed = (
+            np.isfinite(shap_norm) and 
+            shap_norm > 1e-12 and 
+            np.all(np.isfinite(shap_marginal))
+        )
+        
+        if not scale_check_passed:
+            return {
+                'shap_marginal': None,
+                'runtime_ms': (time.time() - start_time) * 1000,
+                'method': explainer_type,
+                'failure_reason': 'shap_values_invalid_or_zero',
+                'scale_check_passed': False
+            }
+        
+        runtime_ms = (time.time() - start_time) * 1000
+        
+        return {
+            'shap_marginal': shap_marginal,
+            'runtime_ms': runtime_ms,
+            'method': explainer_type,
+            'failure_reason': None,
+            'scale_check_passed': True
+        }
+    
+    except Exception as e:
+        return {
+            'shap_marginal': None,
+            'runtime_ms': (time.time() - start_time) * 1000,
+            'method': None,
+            'failure_reason': f'computation_error: {str(e)[:100]}',
+            'scale_check_passed': False
+        }
 
 
 def _detect_nonlinearity(model, base_x, jacobian, eps=0.1):
@@ -218,17 +381,26 @@ def _optimize_with_scipy(model, base_x, y_target, min_constraints, max_constrain
         return base_x
 
 
-
 def _direct_linear_solve(model, base_x, y_base, y_target, weights, 
-                         min_constraints, max_constraints, X_train_max):
+                         min_constraints, max_constraints, X_train_max,
+                         use_shap_calibration=False,  # 新增
+                         alpha=0.5,                    # 新增
+                         shap_result=None):            # 新增
     """
-    直接线性求解法（核心创新）
+    直接线性求解法（支持 SHAP 混合校准）
     
-    基于一阶泰勒展开：
-    y_target ≈ y_base + J·Δx
-    其中 J 是雅可比矩阵
+    核心公式：
+    1. 基础：δy ≈ J·Δx
+    2. SHAP校准：使用 SHAP 边际值校准梯度幅度
+       Sensitivity = α·|J| + (1-α)·|Δφ|
+       Gradient = sign(J) · Sensitivity
     
-    求解：Δx = (y_target - y_base) / J（按权重分配）
+    Returns
+    -------
+    suggested : ndarray
+        建议的投放方案
+    diagnostics : dict
+        诊断信息（包含校准详情、冲突检测等）
     """
     base_x = np.asarray(base_x, dtype=np.float32).ravel()
     n = len(base_x)
@@ -239,7 +411,6 @@ def _direct_linear_solve(model, base_x, y_base, y_target, weights,
     # 确保雅可比矩阵维度正确
     jacobian = np.asarray(jacobian, dtype=np.float32).ravel()
     if len(jacobian) != n:
-        # 如果长度不匹配，截断或填充
         if len(jacobian) > n:
             jacobian = jacobian[:n]
         else:
@@ -262,126 +433,115 @@ def _direct_linear_solve(model, base_x, y_base, y_target, weights,
     # 目标差距
     delta_y = y_target - y_current
     
-    # ===== 正确的线性分配法（基于一阶泰勒展开）=====
-    # 理论基础：一阶泰勒展开 δy ≈ J·Δx
-    # 其中 J = [∂y/∂x₁, ∂y/∂x₂, ..., ∂y/∂xₙ] 是雅可比向量（梯度）
+    # 初始化诊断信息
+    diagnostics = {
+        'shap_used': False,
+        'sign_conflict_ratio': 0.0,
+        'fallback_reason': None,
+        'denominator_fallback': None
+    }
     
-    # 目标：找到 Δx 使得 J·Δx = delta_y，同时考虑权重
-    # 
-    # 数学推导：
-    # 如果不考虑权重，最小化 ||Δx||² 的解析解为：
-    #   Δx = (delta_y / ||J||²) * J
-    # 
-    # 如果考虑SHAP权重（重要的特征应该调整更多），使用加权分配：
-    #   Δx_i = w_i^p * J_i * [delta_y / Σ(w_j^p * J_j²)]
-    # 其中 p=1.5（平衡重要性和多样性，避免过度集中）
-    # 使用 w^1.5 而非 w²：w²过于激进，会导致单一渠道占比过高
-    # 这相当于最小化 Σ[(Δx_i / w_i^0.75)²]，即重要特征允许更大变化但不过度
+    # ===== 策略选择：SHAP 校准 vs 原权重方案 =====
+    calibrated_jacobian = None
     
-    # 1. 计算加权雅可比
-    # 权重策略：w^1.5（更温和的分配，避免过度集中）
-    # w^2.0：过于激进，重要渠道占比过高
-    # w^1.5：平衡，既尊重SHAP重要性，又保持多样性
-    # w^1.0：均匀，忽略SHAP重要性
-    weight_power = 1.5  # 可根据业务需求调整（1.0-2.0）
-    weighted_jacobian = (weights ** weight_power) * jacobian
-    
-    # 2. 计算分母：Σ(w_i^p * J_i²)
-    # 注意：这里是 w^p*J 与 J 的点积，等价于 Σ(w_i^1.5 * J_i²)
-    denominator = np.dot(weighted_jacobian, jacobian)
-    
-    if abs(denominator) > 1e-12:
-        # 正常情况：使用正确的解析解
-        # Δx_i = w_i^p * J_i * [delta_y / Σ(w_j^p * J_j²)]
-        # 当前 p=1.5
-        delta_x = weighted_jacobian * (delta_y / denominator)
-    else:
-        # 雅可比太小（模型对输入几乎不敏感）：使用简单加权分配
-        # Δx_i = w_i * total_change，其中 total_change 使得 Σ(J_i * Δx_i) ≈ delta_y
-        avg_jacobian = np.sum(jacobian * weights)
-        if abs(avg_jacobian) > 1e-12:
-            total_change = delta_y / avg_jacobian
-            delta_x = weights * total_change
+    if use_shap_calibration and shap_result and shap_result['shap_marginal'] is not None:
+        # === 方案 A: SHAP 混合校准 ===
+        shap_marginal = shap_result['shap_marginal']
+        
+        # Critical Fix #2: 符号冲突检测
+        # 检查雅可比方向与 SHAP 方向是否一致
+        # 如果冲突严重（>50%），说明 SHAP 可能不可靠（或雅可比不可靠），应降级
+        sign_conflict = np.sign(jacobian) != np.sign(shap_marginal)
+        # 忽略接近0的项（避免噪声干扰）
+        significant = (np.abs(jacobian) > 1e-6) & (np.abs(shap_marginal) > 1e-6)
+        if np.any(significant):
+            conflict_ratio = np.mean(sign_conflict[significant])
         else:
-            # 极端情况：模型完全不敏感，均匀分配
-            delta_x = np.ones(n) * (delta_y / n)
+            conflict_ratio = 0.0
+            
+        diagnostics['sign_conflict_ratio'] = float(conflict_ratio)
+        
+        if conflict_ratio > 0.5:
+            # 严重冲突：降级到原方案
+            use_shap_calibration = False
+            diagnostics['fallback_reason'] = 'severe_sign_conflict'
+        elif conflict_ratio > 0.3:
+            # 中度冲突：增加雅可比的权重（减少 SHAP 影响）
+            alpha = min(0.9, alpha + 0.4)
+            diagnostics['alpha_adjusted'] = float(alpha)
+        
+        if use_shap_calibration:
+            # 执行混合校准
+            # 1. 幅度混合：Sensitivity = α·|J| + (1-α)·|Δφ|
+            sensitivity = alpha * np.abs(jacobian) + (1 - alpha) * np.abs(shap_marginal)
+            
+            # 2. 方向保持：使用雅可比的符号（通常梯度方向更可靠）
+            calibrated_jacobian = np.sign(jacobian) * sensitivity
+            
+            # 3. 应用用户权重（可选，通常 SHAP 已经包含了重要性）
+            # 这里我们保留 w^0.5 的微调，保留用户偏好但不主导
+            calibrated_jacobian = calibrated_jacobian * (weights ** 0.5)
+            
+            diagnostics['shap_used'] = True
     
-    # 4. 自适应信赖域（限制变化幅度）
-    # 根据变化量的大小动态调整信赖域
-    delta_x_magnitude = np.sqrt(np.sum(delta_x**2))
+    if calibrated_jacobian is None:
+        # === 方案 B: 原权重方案（Fallback）===
+        # w^1.5 * J
+        weight_power = 1.5
+        calibrated_jacobian = (weights ** weight_power) * jacobian
     
-    # 相对变化率（相对于基准投放）
-    relative_change = delta_x_magnitude / (np.linalg.norm(base_x) + 1e-8)
+    # ===== 求解 Δx =====
+    # 公式：Δx = calibrated_J * (delta_y / denominator)
+    # denominator = Σ(calibrated_J * J)
     
-    # 如果变化太大，则缩小步长（保守策略）
-    if relative_change > 1.0:
-        # 变化超过100%，很激进，缩小到50%
-        trust_factor = 0.5
-    elif relative_change > 0.5:
-        # 变化在50%-100%，适当缩小
-        trust_factor = 0.7
+    # Critical Fix #3: Denominator Stability
+    # 分母代表了"预测的总变化量"，必须与 delta_y 同号且非零
+    
+    denominator = np.dot(calibrated_jacobian, jacobian)
+    
+    # 安全检查
+    eps = 1e-10
+    if abs(denominator) < eps:
+        # 分母过小，说明梯度方向与校准方向几乎正交，或者梯度消失
+        diagnostics['denominator_fallback'] = 'level_1_self_dot'
+        
+        # Level 1: 尝试使用校准梯度的自点积（假设 J ≈ calibrated_J）
+        denominator = np.dot(calibrated_jacobian, calibrated_jacobian)
+        
+        if abs(denominator) < eps:
+            # Level 2: 完全退回原方案（纯梯度）
+            diagnostics['denominator_fallback'] = 'level_2_pure_gradient'
+            calibrated_jacobian = jacobian * weights
+            denominator = np.dot(calibrated_jacobian, jacobian)
+            
+            if abs(denominator) < eps:
+                # Level 3: 均匀分配（最后的救命稻草）
+                diagnostics['denominator_fallback'] = 'level_3_uniform'
+                calibrated_jacobian = np.sign(delta_y) * np.ones(n) / n
+                denominator = 1.0  # 任意非零值，后续缩放会修正
+    
+    # 计算步长
+    if abs(denominator) > eps:
+        delta_x = calibrated_jacobian * (delta_y / denominator)
     else:
-        # 变化在50%以内，允许
-        trust_factor = 1.0
+        delta_x = np.zeros(n)
     
-    delta_x = delta_x * trust_factor
+    # Critical Fix #4: Δx Clipping (安全裁剪)
+    # 防止单步变化过大导致模型进入未知区域
+    if X_train_max is not None:
+        max_step = 0.2 * np.asarray(X_train_max)  # 限制为训练数据的 20%
+        # 确保 max_step 正数
+        max_step = np.maximum(max_step, 1.0)
+        delta_x = np.clip(delta_x, -max_step, max_step)
     
-    # 硬约束：单个特征最大变化不超过基准的2倍或固定值
-    max_change = np.maximum(2.0 * base_x, 10.0)
-    delta_x = np.clip(delta_x, -max_change, max_change)
-    
-    # 5. 快速 Line Search（仅验证全步长是否改进）
-    # 应用约束
+    # 计算建议值
     suggested = base_x + delta_x
+    
+    # 应用约束
     suggested, _ = _apply_constraints(suggested, base_x, min_constraints, 
                                      max_constraints, X_train_max)
     
-    # 快速验证：如果全步长不好，尝试半步长
-    try:
-        y_new = _safe_predict(model, suggested)
-        error_full = abs(y_new - y_target)
-        
-        # 如果误差太大，尝试保守步长
-        if error_full > abs(delta_y) * 0.8:
-            suggested_half = base_x + 0.5 * delta_x
-            suggested_half, _ = _apply_constraints(suggested_half, base_x, 
-                                                   min_constraints, max_constraints, X_train_max)
-            y_half = _safe_predict(model, suggested_half)
-            error_half = abs(y_half - y_target)
-            
-            if error_half < error_full:
-                suggested = suggested_half
-                y_new = y_half
-        
-        # ===== 方向验证：检查是否朝正确方向移动 =====
-        # 判断标准：是否朝目标方向移动
-        # - 如果 delta_y > 0（目标更大），则 y_new 应该 > y_current
-        # - 如果 delta_y < 0（目标更小），则 y_new 应该 < y_current
-        
-        direction_correct = (delta_y > 0 and y_new > y_current) or \
-                           (delta_y < 0 and y_new < y_current)
-        
-        if not direction_correct:
-            # 方向错误！梯度估计可能不准确（模型非线性）
-            # 尝试反向：如果 J 符号估计错了，-Δx 可能是正确方向
-            suggested_reverse = base_x - delta_x
-            suggested_reverse, _ = _apply_constraints(suggested_reverse, base_x,
-                                                      min_constraints, max_constraints, X_train_max)
-            y_reverse = _safe_predict(model, suggested_reverse)
-            
-            # 检查反向是否更接近目标
-            error_forward = abs(y_new - y_target)
-            error_reverse = abs(y_reverse - y_target)
-            
-            if error_reverse < error_forward:
-                # 反向确实更好，采用反向结果
-                suggested = suggested_reverse
-                y_new = y_reverse
-    
-    except Exception:
-        pass
-    
-    return suggested
+    return suggested, diagnostics
 
 
 def _apply_constraints(x, base_x, min_c, max_c, X_train_max):
@@ -619,25 +779,83 @@ def optimize_allocation_v2(model, base_x, y_target,
     jacobian_initial, _ = _estimate_jacobian_fast(model, base_x)
     nonlinearity_score = _detect_nonlinearity(model, base_x, jacobian_initial)
     
-    # 根据非线性程度调整策略
+    # ===== Critical Fix #6: 平滑 Alpha 映射 =====
+    def smooth_alpha_mapping(score):
+        """平滑的 alpha 映射函数（避免跳变）"""
+        # sigmoid(10×(score-0.3)) 在 score=0.3 附近快速变化
+        # 但比阶跃函数平滑得多
+        sigmoid_val = 1.0 / (1.0 + np.exp(-10 * (score - 0.3)))
+        alpha = 0.95 - 0.75 * sigmoid_val  # 范围: 0.95 → 0.20
+        return np.clip(alpha, 0.15, 0.95)
+    
+    alpha = smooth_alpha_mapping(nonlinearity_score)
+    
+    # ===== 自适应 SHAP 校准策略 =====
     if nonlinearity_score < 0.2:
-        # 弱非线性：使用默认策略
+        # 弱非线性：使用原方案（不计算 SHAP）
+        use_shap_calibration = False
         adaptive_max_iterations = max_iterations
         use_scipy_fallback = False
-    elif nonlinearity_score < 0.4:
-        # 中等非线性：增加迭代次数
-        adaptive_max_iterations = max_iterations + 2
-        use_scipy_fallback = True
+        shap_result = None
+        calibration_reason = 'weak_nonlinearity_original_scheme'
     else:
-        # 强非线性：显著增加迭代，准备SciPy兜底
-        adaptive_max_iterations = max_iterations + 3
+        # 中度/强非线性：启用 SHAP 校准
+        use_shap_calibration = True
+        adaptive_max_iterations = max_iterations + min(3, int(nonlinearity_score * 10))
         use_scipy_fallback = True
+        
+        # 计算 SHAP 边际值
+        shap_result = _compute_shap_marginal(
+            model, base_x, eps=0.02,  # 与雅可比一致的 eps
+            feature_names=getattr(model, 'feature_names_in_', None)
+        )
+        
+        if shap_result['shap_marginal'] is None:
+            # SHAP 计算失败，降级到原方案
+            use_shap_calibration = False
+            shap_result['fallback_to_original'] = True
+            calibration_reason = f"shap_failed: {shap_result['failure_reason']}"
+        else:
+            # SHAP 成功，使用校准方案
+            calibration_reason = (
+                'moderate_nonlinearity_shap' if nonlinearity_score < 0.4 
+                else 'strong_nonlinearity_shap'
+            )
+            
+            # === 尺度验证（事后检查）===
+            jacobian_norm = np.linalg.norm(jacobian_initial)
+            shap_norm = np.linalg.norm(shap_result['shap_marginal'])
+            
+            # 如果量级相差超过100倍，发出警告
+            scale_ratio = shap_norm / (jacobian_norm + 1e-12)
+            if scale_ratio > 100 or scale_ratio < 0.01:
+                warnings.warn(
+                    f"SHAP/Jacobian 尺度差异较大: {scale_ratio:.2f}, "
+                    f"可能影响校准效果"
+                )
+    
+    # 记录诊断信息
+    diagnostics = {
+        'nonlinearity_score': float(nonlinearity_score),
+        'alpha_computed': float(alpha),
+        'calibration_reason': calibration_reason,
+        'shap_runtime_ms': shap_result['runtime_ms'] if shap_result else 0,
+        'shap_method': shap_result['method'] if shap_result else None,
+        'jacobian_norm': float(jacobian_norm) if 'jacobian_norm' in locals() else None,
+        'shap_norm': float(shap_norm) if 'shap_norm' in locals() else None,
+    }
     
     # === 步骤3：优化求解（快速线性方法）===
-    suggested = _direct_linear_solve(
+    suggested, solve_diagnostics = _direct_linear_solve(
         model, base_x, y_base, y_target_adjusted, weights,
-        min_constraints, max_constraints, X_train_max
+        min_constraints, max_constraints, X_train_max,
+        use_shap_calibration=use_shap_calibration,  # 新增
+        alpha=alpha,                                 # 新增
+        shap_result=shap_result                      # 新增
     )
+    
+    # 合并诊断信息
+    diagnostics.update(solve_diagnostics)
     
     # 自适应迭代精调（使用根据非线性程度调整的迭代次数）
     best_suggested = suggested.copy()
@@ -651,10 +869,16 @@ def optimize_allocation_v2(model, base_x, y_target,
             break
         
         # 基于当前位置再次求解
-        suggested = _direct_linear_solve(
+        suggested, iter_diagnostics = _direct_linear_solve(
             model, suggested, y_pred, y_target_adjusted, weights,
-            min_constraints, max_constraints, X_train_max
+            min_constraints, max_constraints, X_train_max,
+            use_shap_calibration=use_shap_calibration,
+            alpha=alpha,
+            shap_result=shap_result  # 注意：迭代时复用同一个 SHAP 结果
         )
+        
+        # 更新诊断信息（只保留最后一次的）
+        diagnostics.update(iter_diagnostics)
         
         y_pred = _safe_predict(model, suggested)
         error = abs(y_pred - y_target_adjusted)
@@ -799,6 +1023,47 @@ def optimize_allocation_v2(model, base_x, y_target,
     # 标准：投放增加100%，产出至少应该增加30%（根据业务调整）
     efficiency_reasonable = (marginal_efficiency >= 0.3) or (budget_change <= 0)
     
+    # 生成警告信息
+    warnings_list = []
+    
+    # 1. 目标差距警告
+    final_gap_pct = abs(y_final - original_target) / max(abs(original_target), 1.0)
+    if final_gap_pct > 0.2:
+        warnings_list.append({
+            'code': 'large_gap',
+            'severity': 'warning',
+            'message': f"预测结果与目标差距较大 ({final_gap_pct:.1%})",
+            'suggestion': "目标可能超出模型的可行范围，建议降低目标或放宽约束"
+        })
+    
+    # 2. 边际效率警告
+    if not efficiency_reasonable and budget_change > 0:
+        warnings_list.append({
+            'code': 'low_efficiency',
+            'severity': 'warning',
+            'message': f"投入产出效率较低 (边际效率 {marginal_efficiency:.2f})",
+            'suggestion': "当前已进入边际递减区域，继续增加投放可能不划算"
+        })
+    
+    # 3. 约束触达警告
+    constraints_hit = [s for s in constraint_status if s != '正常']
+    if len(constraints_hit) > n_features * 0.5:
+        warnings_list.append({
+            'code': 'constraints_tight',
+            'severity': 'info',
+            'message': f"超过50%的渠道触达约束边界",
+            'suggestion': "约束条件可能限制了优化空间，建议适当放宽"
+        })
+        
+    # 4. SHAP 校准警告
+    if diagnostics.get('sign_conflict_ratio', 0) > 0.3:
+        warnings_list.append({
+            'code': 'shap_conflict',
+            'severity': 'info',
+            'message': f"SHAP方向与梯度方向存在冲突 (冲突率 {diagnostics['sign_conflict_ratio']:.0%})",
+            'suggestion': "模型在当前区域可能存在复杂的非线性交互"
+        })
+    
     return {
         'suggested_allocation': suggested,
         'predicted_value': float(y_final),
@@ -815,16 +1080,29 @@ def optimize_allocation_v2(model, base_x, y_target,
         'efficiency_reasonable': efficiency_reasonable,
         'target_feasible': target_feasible,
         'feasible_range': feasible_range,
-        'method_used': 'direct_linear_solve_v2_with_feasibility',
+        'method_used': 'direct_linear_solve_v2_with_shap_calibration',
         'robustness_level': 'high',
-        # 警告信息
-        'warnings': _generate_warnings(
-            target_feasible, efficiency_reasonable, 
-            original_target, y_max_possible, y_final,
-            budget_change_pct, output_change_pct,
-            min_constraints, max_constraints
-        )
+        'warnings': warnings_list,
+        
+        # ===== 新增：SHAP 校准诊断字段 =====
+        'calibration_strategy': 'shap_hybrid' if diagnostics.get('shap_used') else 'weight_scaling',
+        'calibration_reason': diagnostics.get('calibration_reason'),
+        'nonlinearity_score': diagnostics.get('nonlinearity_score'),
+        'alpha_used': diagnostics.get('alpha_used') or diagnostics.get('alpha_adjusted'),
+        
+        'shap_used': diagnostics.get('shap_used', False),
+        'shap_runtime_ms': diagnostics.get('shap_runtime_ms'),
+        'shap_method': diagnostics.get('shap_method'),
+        'shap_failure_reason': diagnostics.get('failure_reason') or shap_result.get('failure_reason') if shap_result else None,
+        
+        'sign_conflict_ratio': diagnostics.get('sign_conflict_ratio'),
+        'fallback_reason': diagnostics.get('fallback_reason'),
+        'denominator_fallback': diagnostics.get('denominator_fallback'),
+        
+        'jacobian_norm': diagnostics.get('jacobian_norm'),
+        'shap_norm': diagnostics.get('shap_norm')
     }
+    
 
 
 def _generate_warnings(target_feasible, efficiency_reasonable,

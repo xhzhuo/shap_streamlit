@@ -72,7 +72,3 @@ output/
 results/
 models/*.pkl
 models/*.joblib
-
-# 测试和日志文件夹
-test and log file put here/
-

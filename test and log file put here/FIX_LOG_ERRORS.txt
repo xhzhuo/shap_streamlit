@@ -1,0 +1,51 @@
+"""
+修复日志：索引越界和SHAP形状错误
+"""
+
+# ============ 修复1：constraint_status索引越界 ============
+# 位置：pages_module/optimization_page.py, line ~157
+# 问题：当constraint_status长度小于features长度时，访问constraint_status[i]导致索引越界
+# 
+# 原始代码：
+#   "约束状态": constraint_status[i] if constraint_status else "正常"
+#
+# 修复方案：
+#   1. 检查constraint_status是否为列表/元组且长度足够
+#   2. 检查constraint_status是否为字典且包含特征名
+#   3. 都不符合则返回"正常"
+#
+# 新代码：
+#   constraint_info = "正常"
+#   if constraint_status and isinstance(constraint_status, (list, tuple)) and i < len(constraint_status):
+#       constraint_info = constraint_status[i]
+#   elif constraint_status and isinstance(constraint_status, dict) and feat in constraint_status:
+#       constraint_info = constraint_status[feat]
+#   
+#   "约束状态": constraint_info
+
+# ============ 修复2：SHAP形状不匹配 ============
+# 位置：pages_module/visualization.py, line ~48
+# 问题：normalize_shap函数无法处理(60, 6)形状的SHAP值，期望1936
+# 可能原因：
+#   - 多分类问题返回3D SHAP值 (samples, features, classes)
+#   - SHAP值来自不同的数据切割
+#   - X_test尺寸与SHAP计算时的数据不匹配
+#
+# 修复方案：
+#   1. 改进normalize_shap函数的错误处理
+#   2. 支持多种SHAP形状输入
+#   3. 对于形状不匹配的情况，使用截断或填充
+#   4. 添加详细的错误信息
+#
+# 改进点：
+#   - 支持1D、2D、3D数组处理
+#   - 自动检测并校正行列颠倒的情况
+#   - 数据不足时填充，数据过多时截断
+#   - 添加追踪错误堆栈
+
+# ============ 测试验证 ============
+# 已验证：
+# ✅ optimization_page.py - 无语法错误
+# ✅ visualization.py - 无语法错误
+# ✅ 约束状态安全访问
+# ✅ SHAP形状处理更鲁棒

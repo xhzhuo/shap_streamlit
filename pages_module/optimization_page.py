@@ -15,6 +15,49 @@ from optimization import optimize_ad_allocation_robust
 def page_reverse_opt(state):
     """反推与预算优化页面(智能单入口版)"""
     st.header("🔁 反推与预算优化")
+    # =========== 固定使用简洁视觉模式 ===========
+    st.markdown(
+        """
+        <style>
+        :root {
+            --card-bg: #ffffff;
+            --card-radius: 12px;
+            --card-shadow: 0 1px 4px rgba(0,0,0,0.03);
+            --border-soft: #e8edf2;
+            --text-main: #2b3137;
+            --text-sub: #67707b;
+            --accent-blue: #4f8cc9;
+            --accent-green: #4aa785;
+            --accent-warn: #d8a54a;
+            --accent-red: #d4665c;
+        }
+        .ui-card {background: var(--card-bg); border-radius: var(--card-radius); padding:14px 16px; margin:10px 0 16px; border:1px solid var(--border-soft); box-shadow: var(--card-shadow);}
+        .ui-card h4 {margin:0 0 4px 0; font-size:14px; font-weight:600; letter-spacing:0.5px; color:var(--text-main);}
+        .card-info {border:1px solid var(--border-soft);} .card-warn {border:1px solid var(--accent-warn);} .card-error {border:1px solid var(--accent-red);} .card-success {border:1px solid var(--accent-green);}        
+        .ui-card.card-info h4 {color:var(--accent-blue);} .ui-card.card-warn h4 {color:var(--accent-warn);} .ui-card.card-error h4 {color:var(--accent-red);} .ui-card.card-success h4 {color:var(--accent-green);}        
+        .tag {display:inline-block; background:#f3f6f9; color:#4a5562; font-size:11px; padding:2px 6px; border-radius:6px; margin-right:6px; margin-bottom:4px; border:1px solid #e1e5ea;}
+        .metrics-grid {display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-top:4px;}
+        .metric-box {background:#f8fafc; border:1px solid #e3e8ef; border-radius:10px; padding:8px 10px; text-align:center;}
+        .metric-title {font-size:11px; color:var(--text-sub); margin:0; font-weight:500;}
+        .metric-value {font-size:17px; font-weight:600; margin:2px 0 0 0; color:var(--text-main);}
+        .agg-warn-list {margin:2px 0 0; padding-left:18px;}
+        .agg-warn-list li {margin-bottom:3px; font-size:12px; line-height:1.35; color:var(--text-sub);}
+        .section-divider {margin:22px 0 14px; border-top:1px solid #edf1f5;}
+        .stMetric {padding:4px 0 0 0;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    def render_card(body_html: str, kind: str = "info", title: str | None = None):
+        kind_class = {
+            "info": "card-info",
+            "warn": "card-warn",
+            "error": "card-error",
+            "success": "card-success",
+        }.get(kind, "card-info")
+        title_html = f"<h4>{title}</h4>" if title else ""
+        st.markdown(f"<div class='ui-card {kind_class}'>{title_html}{body_html}</div>", unsafe_allow_html=True)
 
     if state.get('model') is None:
         st.info("请先训练模型。")
@@ -102,7 +145,9 @@ def page_reverse_opt(state):
             """, unsafe_allow_html=True)
 
 
-    st.markdown(f"基准预测 {state.get('model_target','目标')}: **{safe_format(y_base, '.2f')}**")
+    # 顶部基准与目标概要（减少分散提示）
+    st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+    st.markdown(f"**基准预测 {state.get('model_target','目标')}:** {safe_format(y_base, '.2f')}")
 
 
     # ==============
@@ -136,7 +181,7 @@ def page_reverse_opt(state):
     min_constraints, max_constraints, total_budget = None, None, None
     
     if constraint_mode == "智能约束（推荐）":
-        st.info("💡 智能约束：自动设置合理的调整范围，防止过度偏离历史数据")
+        render_card("<p style='margin:0;'>💡 自动设置合理调整范围，防止过度偏离历史数据。</p>", kind="info", title="智能约束")
         
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -185,7 +230,7 @@ def page_reverse_opt(state):
             st.dataframe(pd.DataFrame(preview_data), use_container_width=True, hide_index=True)
     
     elif constraint_mode == "自定义约束":
-        st.warning("⚠️ 自定义约束：完全自主设置各渠道的上下限")
+        render_card("<p style='margin:0;'>⚠️ 完全自主设置各渠道上下限，请谨慎避免极端值。</p>", kind="warn", title="自定义约束模式")
         
         # 初始化约束预设状态
         if "constraint_preset" not in st.session_state:
@@ -220,10 +265,22 @@ def page_reverse_opt(state):
         # 显示当前预设的说明
         st.caption(f"💡 {preset_help.get(st.session_state['constraint_preset'], '')}")
         
+        # 兼容旧版本 session_state 中的名称（例如 "⚖️ 灵活"）
+        current_preset = st.session_state.get("constraint_preset", "⚖️ 灵活调整")
+        alias_map = {
+            "⚖️ 灵活": "⚖️ 灵活调整",
+            "灵活": "⚖️ 灵活调整",
+            "灵活调整": "⚖️ 灵活调整",
+        }
+        if current_preset not in preset_options:
+            mapped = alias_map.get(current_preset, "⚖️ 灵活调整")
+            st.session_state["constraint_preset"] = mapped
+            current_preset = mapped
+
         selected_preset = st.radio(
             "选择约束预设",
             preset_options,
-            index=preset_options.index(st.session_state["constraint_preset"]),
+            index=preset_options.index(current_preset),
             horizontal=True,
             label_visibility="collapsed"
         )
@@ -320,7 +377,7 @@ def page_reverse_opt(state):
                 max_constraints.append(float(max_val))
     
     else:  # 无约束
-        st.success("✅ 无约束模式：算法将自由寻找最优解")
+        render_card("<p style='margin:0;'>✅ 算法将自由寻找最优解，结果用于评估潜力。</p>", kind="success", title="无约束模式")
         min_constraints = None
         max_constraints = None
 
@@ -437,30 +494,36 @@ def page_reverse_opt(state):
 
                 st.markdown(f"### 建议方案")
                 
-                # === 显示警告信息 ===
+                # === 聚合显示警告信息，避免多条提示分散 ===
                 warnings = optimization_result.get('warnings', [])
                 if warnings:
-                    for warning in warnings:
-                        severity = warning.get('severity', 'low')
-                        message = warning.get('message', '')
-                        suggestion = warning.get('suggestion', '')
-                        
-                        if severity == 'high':
-                            st.error(f"{message}\n\n💡 {suggestion}")
-                        elif severity == 'medium':
-                            st.warning(f"{message}\n\n💡 {suggestion}")
-                        else:
-                            st.info(f"{message}\n\n💡 {suggestion}")
+                    items = []
+                    for w in warnings:
+                        sev = w.get('severity', 'low')
+                        msg = w.get('message', '')
+                        sug = w.get('suggestion', '')
+                        sev_tag = {"high": "<span class='tag' style='background:#fee2e2;color:#b91c1c;'>高</span>",
+                                   "medium": "<span class='tag' style='background:#fef9c3;color:#ca8a04;'>中</span>",
+                                   "low": "<span class='tag' style='background:#dbeafe;color:#1e3a8a;'>低</span>"}.get(sev, "")
+                        items.append(f"<li>{sev_tag}{msg} <span style='color:#64748b;'>💡 {sug}</span></li>")
+                    render_card(f"<ul class='agg-warn-list'>{''.join(items)}</ul>", kind="warn", title="风险与提示")
                 
                 # === 显示投入产出分析 ===
                 if y_pred_new is not None:
                     # 主要结果
                     adjusted_target = optimization_result.get('adjusted_target')
                     if adjusted_target is not None:
-                        st.info(f"💡 目标已优化调整：{safe_format(target_gmv, '.2f')} → {safe_format(adjusted_target, '.2f')}（基于模型响应曲线的保守估计，实际可能略高）")
-                        st.success(f"预测 {state.get('model_target','目标')}: {safe_format(y_pred_new, '.2f')}（调整后目标：{safe_format(adjusted_target, '.2f')}，达成率：{safe_format(y_pred_new/adjusted_target * 100, '.1f')}%）")
+                        render_card(
+                            f"<p style='margin:0;'>预测 {state.get('model_target','目标')}: <b>{safe_format(y_pred_new, '.2f')}</b><br/>"
+                            f"目标调整：{safe_format(target_gmv, '.2f')} → {safe_format(adjusted_target, '.2f')}，达成率 {safe_format(y_pred_new/adjusted_target * 100, '.1f')}%</p>",
+                            kind="success", title="预测与目标"
+                        )
                     else:
-                        st.success(f"预测 {state.get('model_target','目标')}: {safe_format(y_pred_new, '.2f')}（目标：{safe_format(target_gmv, '.2f')}，达成率：{safe_format(target_achieved_ratio * 100, '.1f')}%）")
+                        render_card(
+                            f"<p style='margin:0;'>预测 {state.get('model_target','目标')}: <b>{safe_format(y_pred_new, '.2f')}</b><br/>"
+                            f"原始目标：{safe_format(target_gmv, '.2f')}，达成率 {safe_format(target_achieved_ratio * 100, '.1f')}%</p>",
+                            kind="success", title="预测与目标"
+                        )
                     
                     # 投入产出分析
                     budget_change_pct = optimization_result.get('budget_change_pct', 0)
@@ -468,18 +531,17 @@ def page_reverse_opt(state):
                     roi = optimization_result.get('roi', 0)
                     marginal_efficiency = optimization_result.get('marginal_efficiency', 0)
                     
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("投放变化", f"{budget_change_pct:+.1f}%")
-                    with col2:
-                        st.metric("产出变化", f"{output_change_pct:+.1f}%")
-                    with col3:
-                        st.metric("ROI", f"{roi:.3f}")
-                    with col4:
-                        efficiency_icon = "✅" if marginal_efficiency >= 0.5 else ("⚠️" if marginal_efficiency >= 0.3 else "❌")
-                        st.metric("边际效率", f"{efficiency_icon} {marginal_efficiency:.2f}")
-                    
-                    st.caption(f"💡 边际效率 = 产出增长率 / 投放增长率。≥0.5为优秀，0.3-0.5为合格，<0.3需要重新评估目标")
+                    # 统一指标展示为紧凑网格
+                    metric_html = (
+                        "<div class='ui-card card-info'><h4>投入产出指标</h4>"
+                        "<div class='metrics-grid'>"
+                        f"<div class='metric-box'><p class='metric-title'>投放变化</p><p class='metric-value'>{budget_change_pct:+.1f}%</p></div>"
+                        f"<div class='metric-box'><p class='metric-title'>产出变化</p><p class='metric-value'>{output_change_pct:+.1f}%</p></div>"
+                        f"<div class='metric-box'><p class='metric-title'>ROI</p><p class='metric-value'>{roi:.3f}</p></div>"
+                        f"<div class='metric-box'><p class='metric-title'>边际效率</p><p class='metric-value'>{marginal_efficiency:.2f}</p></div>"
+                        "</div><p style='margin:8px 0 0; font-size:12px; color:#64748b;'>边际效率 = 产出增长率 / 投放增长率 (≥0.5 优秀，0.3-0.5 合格，<0.3 需评估目标)</p></div>"
+                    )
+                    st.markdown(metric_html, unsafe_allow_html=True)
                     
                 else:
                     st.warning("建议方案预测值不可用。")
@@ -487,7 +549,7 @@ def page_reverse_opt(state):
                 st.dataframe(results_df.style.format(fmt), use_container_width=True)
 
                 if total_budget is not None:
-                    st.info(f"预算对比：基准 {base_x.sum():.2f} → 建议 {np.sum(suggested):.2f} (预算 {total_budget:.2f})")
+                    render_card(f"<p style='margin:0;'>预算对比：基准 {base_x.sum():.2f} → 建议 {np.sum(suggested):.2f} (预算 {total_budget:.2f})</p>", kind="info", title="预算变化")
 
                 # ==============
                 # 响应曲线
