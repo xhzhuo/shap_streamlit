@@ -67,6 +67,7 @@ from pages_module.model_training import page_train_and_eval
 from pages_module.visualization import page_visual_analysis
 from pages_module.optimization_page import page_reverse_opt
 from pages_module.dev_docs import page_dev_docs
+from pages_module import ai_assistant
 
 # ---------------------------
 # 页面：侧栏导航（已去除随机控件）
@@ -77,7 +78,7 @@ with st.sidebar:
     st.markdown("---")
     page = st.radio(
         "导航",
-        ("数据上传 & 预览", "模型训练 & 评估", "可视化分析", "反推/预算优化", "说明文档"),
+        ("数据上传 & 预览", "模型训练 & 评估", "可视化分析", "反推/预算优化", "AI智能助手", "说明文档"),
         index=0
     )
     st.markdown("---")
@@ -98,6 +99,8 @@ elif page == "可视化分析":
     page_visual_analysis(state)
 elif page == "反推/预算优化":
     page_reverse_opt(state)
+elif page == "AI智能助手":
+    ai_assistant.render()
 elif page == "说明文档":
     page_dev_docs()
 

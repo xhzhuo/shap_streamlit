@@ -8,6 +8,17 @@ import streamlit as st
 # 应用密码配置
 APP_PASSWORD = "datatech"  # 修改此处设置你的密码
 
+# LLM API配置 (硅基流动)
+LLM_API_CONFIG = {
+    "api_url": "https://api.siliconflow.cn/v1/chat/completions",
+    "api_key": "sk-unjhqxfdxfrkxzqxijkhjcqxvvhrxzvlkiyycggihucszmck",
+    "model": "deepseek-ai/DeepSeek-V3",  # 改用DeepSeek-V3，速度更快
+    "max_tokens": 1500,  # 减少token数量，加快响应
+    "temperature": 0.7,
+    "top_p": 0.7,
+    "timeout": 120,  # 超时时间120秒
+}
+
 # 页面配置
 PAGE_CONFIG = {
     "page_title": "Ad Effect Intelligence — DataTech",
