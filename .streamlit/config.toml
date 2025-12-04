@@ -1,0 +1,11 @@
+[theme]
+# 主色调 - 与原来的蓝色风格一致
+primaryColor = "#3b6ff2"
+# 背景色
+backgroundColor = "#f6f8fb"
+# 次级背景色
+secondaryBackgroundColor = "#ffffff"
+# 文本颜色
+textColor = "#1c2340"
+# 字体
+font = "sans serif"

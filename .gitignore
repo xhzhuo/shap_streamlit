@@ -42,8 +42,7 @@ venv.bak/
 .pydevproject
 .settings/
 
-# Streamlit
-.streamlit/
+# Streamlit 日志（配置文件保留）
 streamlit_app.log
 
 # 数据和缓存文件
