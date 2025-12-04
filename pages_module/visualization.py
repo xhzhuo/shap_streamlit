@@ -8,12 +8,18 @@ import pandas as pd
 import plotly.express as px
 from utils import shap_values_from_model
 
-
 def page_visual_analysis(state):
     """可视化分析页面"""
-    st.header("📈 可视化分析")
+    
     if state.get('model') is None:
-        st.info("请先训练模型。")
+        st.markdown(
+            """
+            <div class="surface-muted">
+                尚未捕获训练好的模型，请先完成“模型训练 & 评估”。
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         return
     model = state['model']
     X_test = state['X_test']
@@ -30,7 +36,10 @@ def page_visual_analysis(state):
                 return
 
     shap_vals = np.array(state['shap_values'])
-    tab1, tab2, tab3, tab4 = st.tabs(["SHAP Summary", "特征贡献度", "相关性热力图", "特征贡献度（含未观测因素）"])
+    
+    with st.container():
+        st.caption("所有图表均基于测试集 SHAP 值计算，可拖拽、缩放并导出")
+        tab1, tab2, tab3, tab4 = st.tabs(["SHAP Summary", "特征贡献度", "相关性热力图", "含未观测因素"])
 
     # --- SHAP Summary ---
     with tab1:

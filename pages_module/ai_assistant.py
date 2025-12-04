@@ -6,13 +6,9 @@ AI智能助手页面
 import streamlit as st
 from llm_helper import LLMAssistant, SYSTEM_PROMPTS
 
-
 def render():
     """渲染AI助手页面"""
-    
-    st.title("🤖 AI智能助手")
-    st.markdown("---")
-    
+
     # 初始化会话状态
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
@@ -20,36 +16,31 @@ def render():
     if "llm_assistant" not in st.session_state:
         st.session_state.llm_assistant = LLMAssistant()
     
-    # 侧边栏配置
-    with st.sidebar:
-        
-        if st.button("🗑️ 清空对话历史", use_container_width=True):
-            st.session_state.chat_history = []
-            st.rerun()
+    # 侧边栏配置 - 去掉空白卡片
+    if st.button("🗑️ 清空对话历史", use_container_width=True):
+        st.session_state.chat_history = []
+        st.rerun()
     
-    # 主界面 - 显示对话历史
-    st.subheader("💬 对话记录")
-    
-    chat_container = st.container()
-    
-    with chat_container:
-        if not st.session_state.chat_history:
-            st.info("👋 你好！我是AI助手，可以帮你解读模型训练结果、优化建议、SHAP分析等。有什么问题尽管问我！")
-        else:
-            for i, chat in enumerate(st.session_state.chat_history):
-                # 用户消息
-                with st.chat_message("user"):
-                    st.write(chat["user"])
-                
-                # AI回复
-                with st.chat_message("assistant"):
-                    st.write(chat["assistant"])
-    
-    # 输入区域
     st.markdown("---")
     
-    col1, col2 = st.columns([5, 1])
+    # 主界面 - 显示对话历史 - 去掉空白卡片
+    st.subheader("💬 对话记录")
+    if not st.session_state.chat_history:
+        st.info("👋 你好！我是AI助手，可以帮你解读模型训练结果、优化建议、SHAP分析等。有什么问题尽管问我！")
+    else:
+        for chat in st.session_state.chat_history:
+            with st.chat_message("user"):
+                st.write(chat["user"])
+            with st.chat_message("assistant"):
+                st.write(chat["assistant"])
     
+    st.markdown("---")
+    
+    # 输入区域 - 去掉空白卡片
+    st.subheader("✍️ 提问")
+
+    col1, col2 = st.columns([5, 1])
+
     with col1:
         user_input = st.text_area(
             "输入你的问题",
@@ -57,10 +48,10 @@ def render():
             height=100,
             key="user_input"
         )
-    
+
     with col2:
-        st.write("")  # 占位
-        st.write("")  # 占位
+        st.write("")
+        st.write("")
         send_button = st.button("🚀 发送", use_container_width=True, type="primary")
     
     # 快捷问题
@@ -77,7 +68,7 @@ def render():
         if col.button(label, use_container_width=True):
             user_input = question
             send_button = True
-    
+
     # 处理发送消息
     if send_button and user_input:
         with st.spinner("🤔 AI正在思考..."):
@@ -109,7 +100,6 @@ def render():
                 st.rerun()
             else:
                 st.error(f"❌ {result['error']}")
-
 
 def _auto_select_mode(user_message: str, context: str) -> str:
     """
@@ -154,7 +144,6 @@ def _auto_select_mode(user_message: str, context: str) -> str:
     
     # 5. 默认使用通用模式
     return 'general'
-
 
 def _extract_context() -> str:
     """
@@ -270,7 +259,6 @@ def _extract_context() -> str:
     
     return "\n".join(context_parts)
 
-
 def render_ai_sidebar_widget(
     page_type: str,
     specific_context: dict = None
@@ -326,7 +314,6 @@ def render_ai_sidebar_widget(
                 st.warning("请先输入问题")
         
         st.markdown("或者前往 [AI助手页面](#) 进行深度对话")
-
 
 if __name__ == "__main__":
     render()

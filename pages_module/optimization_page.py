@@ -14,41 +14,6 @@ from optimization import optimize_ad_allocation_robust
 
 def page_reverse_opt(state):
     """反推与预算优化页面(智能单入口版)"""
-    st.header("🔁 反推与预算优化")
-    # =========== 固定使用简洁视觉模式 ===========
-    st.markdown(
-        """
-        <style>
-        :root {
-            --card-bg: #ffffff;
-            --card-radius: 12px;
-            --card-shadow: 0 1px 4px rgba(0,0,0,0.03);
-            --border-soft: #e8edf2;
-            --text-main: #2b3137;
-            --text-sub: #67707b;
-            --accent-blue: #4f8cc9;
-            --accent-green: #4aa785;
-            --accent-warn: #d8a54a;
-            --accent-red: #d4665c;
-        }
-        .ui-card {background: var(--card-bg); border-radius: var(--card-radius); padding:14px 16px; margin:10px 0 16px; border:1px solid var(--border-soft); box-shadow: var(--card-shadow);}
-        .ui-card h4 {margin:0 0 4px 0; font-size:14px; font-weight:600; letter-spacing:0.5px; color:var(--text-main);}
-        .card-info {border:1px solid var(--border-soft);} .card-warn {border:1px solid var(--accent-warn);} .card-error {border:1px solid var(--accent-red);} .card-success {border:1px solid var(--accent-green);}        
-        .ui-card.card-info h4 {color:var(--accent-blue);} .ui-card.card-warn h4 {color:var(--accent-warn);} .ui-card.card-error h4 {color:var(--accent-red);} .ui-card.card-success h4 {color:var(--accent-green);}        
-        .tag {display:inline-block; background:#f3f6f9; color:#4a5562; font-size:11px; padding:2px 6px; border-radius:6px; margin-right:6px; margin-bottom:4px; border:1px solid #e1e5ea;}
-        .metrics-grid {display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-top:4px;}
-        .metric-box {background:#f8fafc; border:1px solid #e3e8ef; border-radius:10px; padding:8px 10px; text-align:center;}
-        .metric-title {font-size:11px; color:var(--text-sub); margin:0; font-weight:500;}
-        .metric-value {font-size:17px; font-weight:600; margin:2px 0 0 0; color:var(--text-main);}
-        .agg-warn-list {margin:2px 0 0; padding-left:18px;}
-        .agg-warn-list li {margin-bottom:3px; font-size:12px; line-height:1.35; color:var(--text-sub);}
-        .section-divider {margin:22px 0 14px; border-top:1px solid #edf1f5;}
-        .stMetric {padding:4px 0 0 0;}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
     def render_card(body_html: str, kind: str = "info", title: str | None = None):
         kind_class = {
             "info": "card-info",
@@ -60,7 +25,14 @@ def page_reverse_opt(state):
         st.markdown(f"<div class='ui-card {kind_class}'>{title_html}{body_html}</div>", unsafe_allow_html=True)
 
     if state.get('model') is None:
-        st.info("请先训练模型。")
+        st.markdown(
+            """
+            <div class="surface-muted">
+                尚无可用模型，请先完成前置训练步骤。
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         return
 
     model = state['model']

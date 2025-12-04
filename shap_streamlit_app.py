@@ -4,6 +4,7 @@
 """
 
 import streamlit as st
+import textwrap
 
 # 导入配置
 from config import PAGE_CONFIG, CSS_STYLE, APP_PASSWORD
@@ -19,42 +20,43 @@ st.markdown(CSS_STYLE, unsafe_allow_html=True)
 # ---------------------------
 def check_password():
     """返回 True 表示密码正确"""
-    
-    # 初始化 session state
+
     if "password_correct" not in st.session_state:
         st.session_state.password_correct = False
 
-    # 如果已经验证通过，直接返回
     if st.session_state.password_correct:
         return True
 
-    # 显示密码输入界面
-    st.markdown('<div class="brand">🔒 Ad Effect Intelligence</div>', unsafe_allow_html=True)
-    st.markdown('<div class="subtitle">DataTech — 请输入密码访问应用</div>', unsafe_allow_html=True)
-    st.markdown("---")
-    
-    # 创建居中的列布局
-    col1, col2, col3 = st.columns([1, 2, 1])
-    
-    with col2:
-        st.markdown("### 🔐 身份验证")
+    st.markdown(
+        """
+        <div class="password-card password-card__form">
+            <div class="app-hero__badge">Secure Workspace</div>
+            <h2>Ad Effect Intelligence</h2>
+            <p class="subtitle">DataTech · 请输入访问密码以解锁工作台</p>
+            <div class="password-divider"></div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.form("password_form"):
         password = st.text_input(
-            "请输入密码",
+            "访问密码",
             type="password",
             key="password_input",
             placeholder="输入密码后按回车"
         )
-        
-        if st.button("🔓 解锁", use_container_width=True):
-            if password == APP_PASSWORD:
-                st.session_state.password_correct = True
-                st.success("✅ 密码正确！正在加载应用...")
-                st.rerun()
-            else:
-                st.error("❌ 密码错误，请重试")
-        
-        st.markdown("---")
-    
+        submitted = st.form_submit_button("进入工作台")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if submitted:
+        if password == APP_PASSWORD:
+            st.session_state.password_correct = True
+            st.success("✅ 密码正确！正在加载应用...")
+            st.rerun()
+        else:
+            st.error("❌ 密码错误，请重试")
+
     return False
 
 # 检查密码
@@ -70,11 +72,20 @@ from pages_module.dev_docs import page_dev_docs
 from pages_module import ai_assistant
 
 # ---------------------------
-# 页面：侧栏导航（已去除随机控件）
+# 页面：侧栏导航
 # ---------------------------
+if 'state' not in st.session_state:
+    st.session_state.state = {}
+state = st.session_state.state
+
+dataset = state.get('df')
+rows = f"{len(dataset):,}" if dataset is not None else "—"
+cols = f"{dataset.shape[1]:,}" if dataset is not None else "—"
+model_ready = "已训练" if state.get('model') is not None else "待训练"
+target_name = state.get('model_target', '未选择')
+
 with st.sidebar:
     st.markdown('<div class="brand">Ad Effect Intelligence</div>', unsafe_allow_html=True)
-    st.markdown('<div class="subtitle">DataTech </div>', unsafe_allow_html=True)
     st.markdown("---")
     page = st.radio(
         "导航",
@@ -82,14 +93,46 @@ with st.sidebar:
         index=0
     )
     st.markdown("---")
+    st.markdown("**当前数据**")
+    st.metric("样本量", rows)
+    st.metric("字段数", cols)
+    st.metric("模型状态", model_ready)
+    st.caption(f"目标变量：{target_name}")
+    st.markdown("---")
     st.caption("© DataTech · Smart Ad Analysis")
 
-# ---------------------------
-# 主控制流
-# ---------------------------
-if 'state' not in st.session_state:
-    st.session_state.state = {}
-state = st.session_state.state
+flow_steps = [
+    ("步骤 01", "数据上传 & 预览", "完成" if dataset is not None else "待开始"),
+    ("步骤 02", "模型训练 & 评估", model_ready),
+    ("步骤 03", "可视化分析", "可用" if state.get('shap_values') is not None else "待生成"),
+    ("步骤 04", "反推 / 预算优化", "待执行" if state.get('model') is None else "准备就绪"),
+    ("AI", "AI智能助手", "实时"),
+]
+
+if page != "说明文档":
+    flow_html = "".join(
+        [
+            f"""
+            <div class="flow-step">
+                <small>{label}</small>
+                <strong>{title}</strong>
+                <span class="small">状态：{status}</span>
+            </div>
+            """
+            for label, title, status in flow_steps
+        ]
+    )
+
+    st.markdown(
+        textwrap.dedent(
+            f"""
+            <div class="flow-steps">
+                {flow_html}
+            </div>
+            """
+        ),
+        unsafe_allow_html=True,
+    )
 
 if page == "数据上传 & 预览":
     page_data_upload(state)
@@ -104,5 +147,4 @@ elif page == "AI智能助手":
 elif page == "说明文档":
     page_dev_docs()
 
-st.markdown("---")
-st.markdown('<div class="small">Version：Beta</div>', unsafe_allow_html=True)
+st.markdown("<p class='small' style='margin-top:2rem;'>Version · Beta</p>", unsafe_allow_html=True)

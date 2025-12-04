@@ -5,11 +5,9 @@
 
 import streamlit as st
 
-
 def page_dev_docs():
     """开发文档页面 - 技术原理与数学公式详解"""
-    st.header("📘 技术文档与数学原理")
-    
+
     st.info("💡 **阅读提示**：本文档适合希望深入了解算法原理的用户。如需快速上手，请参考主 README 文档。")
     
     st.markdown("本文档详细介绍 Ad Effect Intelligence 使用的核心算法、评估指标和优化方法。")

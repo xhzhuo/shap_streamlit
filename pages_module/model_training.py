@@ -3,12 +3,18 @@ import numpy as np
 from utils import train_model, metrics_for_model, safe_format
 from models import evaluate_model_quality
 
-
 def page_train_and_eval(state):
     """模型训练与评估页面"""
-    st.header("⚙️ 模型训练与评估")
+    
     if state.get('df') is None:
-        st.info("请先上传数据。")
+        st.markdown(
+            """
+            <div class="surface-muted">
+                需要先在“数据上传”页面加载数据集，才可以配置训练任务。
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         return
     df = state['df_sanitized'] if state.get('df_sanitized') is not None else state['df']
     numeric_cols = state.get('numeric_cols', df.select_dtypes(include=[np.number]).columns.tolist())
@@ -43,7 +49,10 @@ def page_train_and_eval(state):
         state['target_var'] = numeric_cols[0]
     
     target_idx = numeric_cols.index(state['target_var'])
-    target = st.selectbox("🎯 目标变量 (Target)", options=numeric_cols, index=target_idx, key="target_select")
+
+    st.caption("先锁定目标变量，再挑选最有业务意义的特征，控制特征数量可以提升模型稳定性")
+
+    target = st.selectbox("🎯 目标变量", options=numeric_cols, index=target_idx, key="target_select")
     
     # 当目标变量改变时，重置特征选择
     if target != state['target_var']:
@@ -81,7 +90,9 @@ def page_train_and_eval(state):
     st.markdown(f"已选特征： **{len(selected_features)}** 个")
 
     st.markdown("---")
-    st.markdown("### 模型训练")
+    
+    st.subheader("🚀 模型训练")
+    st.caption("默认使用 200 棵树的随机森林，可选启用智能调参（RandomizedSearchCV）")
     
     # === 参数调优选项 ===
     enable_tuning = st.checkbox(
@@ -90,7 +101,7 @@ def page_train_and_eval(state):
         help="自动搜索最优RandomForest参数，可提升5-15%性能"
     )
     
-    run = st.button("🚀 训练模型")
+    run = st.button("🚀 训练模型", use_container_width=True)
 
     if run:
         if len(selected_features) == 0:
@@ -199,12 +210,13 @@ def page_train_and_eval(state):
 
     if state.get("metrics"):
         m = state["metrics"]
+        st.markdown("---")
+        st.subheader("📊 关键指标")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("训练 R²", safe_format(m.get('train_r2'), ".3f"))
         c2.metric("测试 R²", safe_format(m.get('test_r2'), ".3f"))
         c3.metric("训练 NRMSE", safe_format(m.get('train_nrmse'), ".3f"))
         c4.metric("测试 NRMSE", safe_format(m.get('test_nrmse'), ".3f"))
-
         st.caption(f"交叉验证 R²: {safe_format(m.get('cv_mean'), '.3f')} ± {safe_format(m.get('cv_std'), '.3f')}")
 
         # --- 模型评分卡 ---
@@ -341,17 +353,7 @@ def page_train_and_eval(state):
                         bargap=0.15,
                     )
 
-                    st.markdown("""
-                    <div style="background:white;border-radius:12px;
-                                box-shadow:0 2px 10px rgba(0,0,0,0.05);
-                                padding:20px 25px;margin-top:10px;">
-                    """, unsafe_allow_html=True)
-
-                    st.plotly_chart(fig, width='stretch')
-
-                    st.markdown("</div>", unsafe_allow_html=True)
+                    st.plotly_chart(fig, use_container_width=True)
 
             except Exception as e:
                 st.warning(f"无法显示预测对比图表: {e}")
-                
-            #test
