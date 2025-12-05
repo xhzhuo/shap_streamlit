@@ -105,7 +105,7 @@ flow_steps = [
     ("步骤 01", "数据上传 & 预览", "完成" if dataset is not None else "待开始"),
     ("步骤 02", "模型训练 & 评估", model_ready),
     ("步骤 03", "可视化分析", "可用" if state.get('shap_values') is not None else "待生成"),
-    ("步骤 04", "反推 / 预算优化", "待执行" if state.get('model') is None else "准备就绪"),
+    ("步骤 04", "反推/预算优化", "待执行" if state.get('model') is None else "准备就绪"),
     ("AI", "AI智能助手", "实时"),
 ]
 
@@ -113,7 +113,7 @@ if page != "说明文档":
     flow_html = "".join(
         [
             f"""
-            <div class="flow-step">
+            <div class="flow-step {'active' if title == page else ''}">
                 <small>{label}</small>
                 <strong>{title}</strong>
                 <span class="small">状态：{status}</span>
