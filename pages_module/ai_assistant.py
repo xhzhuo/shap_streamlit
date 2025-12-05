@@ -23,16 +23,27 @@ def render():
     
     st.markdown("---")
     
-    # 主界面 - 显示对话历史 - 去掉空白卡片
+    # 主界面 - 显示对话历史 - 使用自定义样式
     st.subheader("💬 对话记录")
     if not st.session_state.chat_history:
         st.info("👋 你好！我是AI助手，可以帮你解读模型训练结果、优化建议、SHAP分析等。有什么问题尽管问我！")
     else:
-        for chat in st.session_state.chat_history:
-            with st.chat_message("user"):
-                st.write(chat["user"])
-            with st.chat_message("assistant"):
-                st.write(chat["assistant"])
+        for i, chat in enumerate(st.session_state.chat_history):
+            # 用户消息 - 简洁卡片
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, #f0f4ff 0%, #e8f0ff 100%); 
+                        border-radius: 16px; 
+                        padding: 0.9rem 1.2rem; 
+                        margin-bottom: 0.6rem;
+                        border-left: 3px solid #3b6ff2;">
+                <div style="font-size: 0.75rem; color: #6b728e; font-weight: 600; margin-bottom: 0.3rem;">👤你的提问</div>
+                <div style="color: #1c2340; line-height: 1.6;">{chat["user"]}</div>
+            </div>
+            """, unsafe_allow_html=True)
+    
+            
+            # 使用markdown渲染AI回复内容(支持格式化)
+            st.markdown(chat["assistant"])
     
     st.markdown("---")
     
@@ -57,7 +68,7 @@ def render():
     # 快捷问题
     st.markdown("#### 💡 快捷问题")
     quick_questions = {
-        "模型性能": "请分析当前模型的整体性能表现，包括准确率、AUC等指标",
+        "模型性能": "请分析当前模型的整体性能表现",
         "特征重要性": "哪些特征对模型预测影响最大？请详细解读",
         "优化建议": "基于当前结果，你有什么具体的优化建议？",
         "投放策略": "根据分析结果，给出实际的广告投放策略建议"

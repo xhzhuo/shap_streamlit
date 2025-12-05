@@ -315,6 +315,82 @@ span[data-baseweb="checkbox"][aria-checked="true"] div{
 .chat-bubble.user{background:var(--surface-alt);}
 .chat-bubble.assistant{background:#fff7ec;border:1px solid #ffe1b8;}
 
+/* AI助手Markdown内容美化 */
+.stMarkdown h2{
+  font-size:1.15rem;
+  font-weight:650;
+  color:var(--text);
+  margin-top:1rem;
+  margin-bottom:0.5rem;
+  border-bottom:2px solid var(--surface-alt);
+  padding-bottom:0.3rem;
+}
+.stMarkdown h3{
+  font-size:1rem;
+  font-weight:600;
+  color:var(--accent-deep);
+  margin-top:0.8rem;
+  margin-bottom:0.4rem;
+}
+.stMarkdown ul, .stMarkdown ol{
+  margin:0.5rem 0;
+  padding-left:1.5rem;
+  line-height:1.8;
+}
+.stMarkdown li{
+  margin-bottom:0.3rem;
+  color:var(--text);
+}
+.stMarkdown strong{
+  color:var(--accent-deep);
+  font-weight:650;
+}
+.stMarkdown code{
+  background:var(--surface-alt);
+  color:var(--accent);
+  padding:0.15rem 0.4rem;
+  border-radius:4px;
+  font-size:0.9em;
+  font-family:'Consolas','Monaco','Courier New',monospace;
+}
+.stMarkdown pre{
+  background:var(--surface-alt);
+  border:1px solid var(--border);
+  border-radius:8px;
+  padding:0.8rem;
+  overflow-x:auto;
+  margin:0.6rem 0;
+}
+.stMarkdown pre code{
+  background:transparent;
+  padding:0;
+}
+.stMarkdown table{
+  border-collapse:collapse;
+  width:100%;
+  margin:0.8rem 0;
+  font-size:0.9rem;
+}
+.stMarkdown th{
+  background:var(--surface-alt);
+  color:var(--accent-deep);
+  font-weight:600;
+  padding:0.6rem 0.8rem;
+  text-align:left;
+  border:1px solid var(--border);
+}
+.stMarkdown td{
+  padding:0.5rem 0.8rem;
+  border:1px solid var(--border);
+}
+.stMarkdown blockquote{
+  border-left:3px solid var(--accent);
+  padding-left:1rem;
+  margin:0.8rem 0;
+  color:var(--muted);
+  font-style:italic;
+}
+
 .flow-step.active{
   background:linear-gradient(135deg,#f0f7ff 0%,#e6f0ff 100%) !important;
   border:1.5px solid #3b6ff2 !important;
