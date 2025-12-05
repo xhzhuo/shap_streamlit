@@ -101,8 +101,10 @@ section[data-testid="stSidebar"]>div{
   box-shadow:0 8px 24px rgba(15,23,42,0.05);
 }
 .flow-step small{display:block;color:var(--muted);font-size:0.72rem;letter-spacing:0.08em;text-transform:uppercase;}
-.flow-step strong{display:block;font-size:1rem;margin-top:0.2rem;}
+.flow-step strong{display:block;font-size:1rem;margin-top:0.2rem;color:#1c2340 !important;}
 .flow-step span{display:block;margin-top:0.3rem;color:var(--accent);font-size:0.85rem;font-weight:600;}
+.flow-step.active{background:linear-gradient(135deg,#f0f7ff 0%,#e8f0ff 100%);border-color:var(--accent);}
+.flow-step.active strong{color:#1c2340 !important;}
 .page-hero{
   background:var(--surface);
   border-radius:var(--radius);

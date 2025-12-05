@@ -209,7 +209,7 @@ def page_visual_analysis(state):
                 st.plotly_chart(pie_fig, use_container_width=True)
             
             with col2:
-                st.markdown("#### 📊 贡献度明细")
+                st.markdown("#### 贡献度明细")
                 
                 # 格式化表格数据
                 display_df = pie_df.copy()
