@@ -85,6 +85,7 @@ rows = f"{len(dataset):,}" if dataset is not None else "—"
 cols = f"{dataset.shape[1]:,}" if dataset is not None else "—"
 model_ready = "已训练" if state.get('model') is not None else "待训练"
 target_name = state.get('model_target', '未选择')
+adstock_dataset = state.get('adstock_ridge_df')
 adstock_result = state.get('adstock_ridge_result')
 adstock_ready = "已完成" if isinstance(adstock_result, dict) and adstock_result.get("ok") else "待配置"
 
@@ -157,12 +158,27 @@ with st.sidebar:
 
     page = st.session_state.active_page
 
+    if page == "Adstock Ridge 预测":
+        current_rows = f"{len(adstock_dataset):,}" if adstock_dataset is not None else "—"
+        current_cols = f"{adstock_dataset.shape[1]:,}" if adstock_dataset is not None else "—"
+        current_model_ready = adstock_ready
+        adstock_config = state.get("adstock_ridge_config")
+        current_target_name = state.get("adstock_ridge_target")
+        if not current_target_name and adstock_config is not None:
+            current_target_name = getattr(adstock_config, "target_col", "未选择")
+        current_target_name = current_target_name or "未选择"
+    else:
+        current_rows = rows
+        current_cols = cols
+        current_model_ready = model_ready
+        current_target_name = target_name
+
     st.markdown("---")
     st.markdown("**当前数据**")
-    st.metric("样本量", rows)
-    st.metric("字段数", cols)
-    st.metric("模型状态", model_ready)
-    st.caption(f"目标变量：{target_name}")
+    st.metric("样本量", current_rows)
+    st.metric("字段数", current_cols)
+    st.metric("模型状态", current_model_ready)
+    st.caption(f"目标变量：{current_target_name}")
     st.markdown("---")
     st.caption("© DataTech · Smart Ad Analysis")
 
@@ -197,15 +213,6 @@ if page not in ("说明文档", "Adstock Ridge 预测"):
             </div>
             """
         ),
-        unsafe_allow_html=True,
-    )
-elif page == "Adstock Ridge 预测":
-    st.markdown(
-        f"""
-        <div class="surface-muted">
-            Adstock Ridge 预测是独立专项建模工具，不依赖主流程的随机森林训练结果。当前状态：{adstock_ready}
-        </div>
-        """,
         unsafe_allow_html=True,
     )
 

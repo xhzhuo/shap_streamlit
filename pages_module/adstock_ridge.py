@@ -503,6 +503,19 @@ def page_adstock_ridge(state: dict) -> None:
     profile_df = infer_field_profile(df)
     state["adstock_ridge_df"] = df
     state["adstock_ridge_profile"] = profile_df
+    data_signature = (
+        uploaded_file.name,
+        sheet_name,
+        df.shape,
+        tuple(df.columns.astype(str).tolist()),
+    )
+    if state.get("adstock_ridge_data_signature") != data_signature:
+        state["adstock_ridge_data_signature"] = data_signature
+        state.pop("adstock_ridge_result", None)
+        state.pop("adstock_ridge_config", None)
+        state.pop("adstock_ridge_roles", None)
+        state.pop("adstock_ridge_target", None)
+        st.rerun()
 
     c1, c2, c3 = st.columns(3)
     c1.metric("样本量", f"{df.shape[0]:,}")
@@ -540,6 +553,10 @@ def page_adstock_ridge(state: dict) -> None:
         event_cols = st.multiselect("事件变量 Event Flags", cols, default=[])
         category_col = st.selectbox("品类变量 Category", cols, index=None, placeholder="Choose an option")
         diagnostic_cols = st.multiselect("诊断字段 Diagnostic", cols, default=[])
+
+    if target_col and state.get("adstock_ridge_target") != target_col:
+        state["adstock_ridge_target"] = target_col
+        st.rerun()
 
     selected_model_cols = set(media_cols + control_cols + event_cols)
     if target_col in selected_model_cols:
