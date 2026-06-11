@@ -63,6 +63,18 @@ section[data-testid="stSidebar"]>div{
   padding:2rem 1.2rem 2.4rem;
 }
 .brand{font-size:1.3rem;font-weight:600;color:var(--accent);margin-bottom:0.2rem;}
+.sidebar-section-label{
+  margin:1.05rem 0 0.35rem;
+  padding:0.35rem 0.65rem;
+  border-radius:8px;
+  background:#eef4ff;
+  color:var(--accent-deep);
+  font-size:0.76rem;
+  font-weight:700;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+  border:1px solid rgba(59,111,242,0.12);
+}
 .subtitle{color:var(--muted);font-size:0.9rem;margin-bottom:0.4rem;}
 .small{font-size:0.82rem;color:var(--muted);}
 

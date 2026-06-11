@@ -88,23 +88,75 @@ target_name = state.get('model_target', '未选择')
 adstock_result = state.get('adstock_ridge_result')
 adstock_ready = "已完成" if isinstance(adstock_result, dict) and adstock_result.get("ok") else "待配置"
 
+MAIN_PAGES = (
+    "数据上传 & 预览",
+    "模型训练 & 评估",
+    "可视化分析",
+    "反推/预算优化",
+    "分析报告",
+    "AI智能助手",
+)
+SPECIAL_TOOL_PAGES = (
+    "Adstock Ridge 预测",
+)
+SUPPORT_PAGES = (
+    "说明文档",
+)
+ALL_PAGES = MAIN_PAGES + SPECIAL_TOOL_PAGES + SUPPORT_PAGES
+
+if "active_page" not in st.session_state or st.session_state.active_page not in ALL_PAGES:
+    st.session_state.active_page = MAIN_PAGES[0]
+
+
+def _select_sidebar_page(key: str) -> None:
+    selected = st.session_state.get(key)
+    if selected:
+        st.session_state.active_page = selected
+
+
 with st.sidebar:
     st.markdown('<div class="brand">Ad Effect Intelligence</div>', unsafe_allow_html=True)
-    st.markdown("---")
-    page = st.radio(
-        "导航",
-        (
-            "数据上传 & 预览",
-            "模型训练 & 评估",
-            "可视化分析",
-            "反推/预算优化",
-            "分析报告",
-            "Adstock Ridge 预测",
-            "AI智能助手",
-            "说明文档",
-        ),
-        index=0
+    st.caption("Smart Ad Analysis Workspace")
+
+    st.markdown('<div class="sidebar-section-label">Shapley & Random Forest</div>', unsafe_allow_html=True)
+    main_nav_key = f"main_nav_{st.session_state.active_page in MAIN_PAGES}"
+    st.radio(
+        "主流程",
+        MAIN_PAGES,
+        index=MAIN_PAGES.index(st.session_state.active_page) if st.session_state.active_page in MAIN_PAGES else None,
+        key=main_nav_key,
+        label_visibility="collapsed",
+        on_change=_select_sidebar_page,
+        args=(main_nav_key,),
     )
+
+    st.markdown('<div class="sidebar-section-label">Adstock & Ridge</div>', unsafe_allow_html=True)
+    tool_nav_key = f"tool_nav_{st.session_state.active_page in SPECIAL_TOOL_PAGES}"
+    st.radio(
+        "专项建模工具",
+        SPECIAL_TOOL_PAGES,
+        index=SPECIAL_TOOL_PAGES.index(st.session_state.active_page) if st.session_state.active_page in SPECIAL_TOOL_PAGES else None,
+        key=tool_nav_key,
+        label_visibility="collapsed",
+        on_change=_select_sidebar_page,
+        args=(tool_nav_key,),
+    )
+    st.caption(f"Adstock Ridge 状态：{adstock_ready}")
+
+    st.markdown('<div class="sidebar-section-label">支持</div>', unsafe_allow_html=True)
+    support_nav_key = f"support_nav_{st.session_state.active_page in SUPPORT_PAGES}"
+    st.radio(
+        "支持",
+        SUPPORT_PAGES,
+        index=SUPPORT_PAGES.index(st.session_state.active_page) if st.session_state.active_page in SUPPORT_PAGES else None,
+        key=support_nav_key,
+        label_visibility="collapsed",
+        on_change=_select_sidebar_page,
+        args=(support_nav_key,),
+    )
+
+    page = st.session_state.active_page
+
     st.markdown("---")
     st.markdown("**当前数据**")
     st.metric("样本量", rows)
