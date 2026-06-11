@@ -67,7 +67,9 @@ if not check_password():
 from pages_module.data_upload import page_data_upload
 from pages_module.model_training import page_train_and_eval
 from pages_module.visualization import page_visual_analysis
+from pages_module.adstock_ridge import page_adstock_ridge
 from pages_module.optimization_page import page_reverse_opt
+from pages_module.report_generator import page_report_generator
 from pages_module.dev_docs import page_dev_docs
 from pages_module import ai_assistant
 
@@ -83,13 +85,24 @@ rows = f"{len(dataset):,}" if dataset is not None else "—"
 cols = f"{dataset.shape[1]:,}" if dataset is not None else "—"
 model_ready = "已训练" if state.get('model') is not None else "待训练"
 target_name = state.get('model_target', '未选择')
+adstock_result = state.get('adstock_ridge_result')
+adstock_ready = "已完成" if isinstance(adstock_result, dict) and adstock_result.get("ok") else "待配置"
 
 with st.sidebar:
     st.markdown('<div class="brand">Ad Effect Intelligence</div>', unsafe_allow_html=True)
     st.markdown("---")
     page = st.radio(
         "导航",
-        ("数据上传 & 预览", "模型训练 & 评估", "可视化分析", "反推/预算优化", "AI智能助手", "说明文档"),
+        (
+            "数据上传 & 预览",
+            "模型训练 & 评估",
+            "可视化分析",
+            "反推/预算优化",
+            "分析报告",
+            "Adstock Ridge 预测",
+            "AI智能助手",
+            "说明文档",
+        ),
         index=0
     )
     st.markdown("---")
@@ -106,10 +119,11 @@ flow_steps = [
     ("步骤 02", "模型训练 & 评估", model_ready),
     ("步骤 03", "可视化分析", "可用" if state.get('shap_values') is not None else "待生成"),
     ("步骤 04", "反推/预算优化", "待执行" if state.get('model') is None else "准备就绪"),
+    ("步骤 05", "分析报告", "可生成" if state.get('model') is not None else "待准备"),
     ("AI", "AI智能助手", "实时"),
 ]
 
-if page != "说明文档":
+if page not in ("说明文档", "Adstock Ridge 预测"):
     flow_html = "".join(
         [
             f"""
@@ -133,6 +147,15 @@ if page != "说明文档":
         ),
         unsafe_allow_html=True,
     )
+elif page == "Adstock Ridge 预测":
+    st.markdown(
+        f"""
+        <div class="surface-muted">
+            Adstock Ridge 预测是独立专项建模工具，不依赖主流程的随机森林训练结果。当前状态：{adstock_ready}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 if page == "数据上传 & 预览":
     page_data_upload(state)
@@ -140,8 +163,12 @@ elif page == "模型训练 & 评估":
     page_train_and_eval(state)
 elif page == "可视化分析":
     page_visual_analysis(state)
+elif page == "Adstock Ridge 预测":
+    page_adstock_ridge(state)
 elif page == "反推/预算优化":
     page_reverse_opt(state)
+elif page == "分析报告":
+    page_report_generator(state)
 elif page == "AI智能助手":
     ai_assistant.render()
 elif page == "说明文档":

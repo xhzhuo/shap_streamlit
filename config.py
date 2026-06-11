@@ -133,8 +133,9 @@ section[data-testid="stSidebar"]>div{
 .stat-card span{display:block;font-size:1.2rem;font-weight:600;margin-top:0.15rem;}
 .pill{display:inline-flex;align-items:center;padding:0.05rem 0.75rem;border-radius:999px;background:rgba(59,111,242,0.08);color:var(--accent);font-size:0.82rem;font-weight:500;}
 .surface-muted{background:#f9fbff;border-radius:var(--radius);padding:1rem;border:1px dashed var(--border);color:var(--muted);}
-/* Primary buttons (standard + form submit) */
+/* Primary buttons (standard + form submit + download) */
 .stButton>button,
+.stDownloadButton>button,
 div[data-testid="baseButton-primary"] button,
 div[data-testid="stFormSubmitButton"] button,
 button[kind="primary"]{
@@ -148,6 +149,7 @@ button[kind="primary"]{
   transition:transform 0.18s ease,box-shadow 0.18s ease,filter 0.18s ease !important;
 }
 .stButton>button:hover,
+.stDownloadButton>button:hover,
 div[data-testid="baseButton-primary"] button:hover,
 div[data-testid="stFormSubmitButton"] button:hover,
 button[kind="primary"]:hover{
@@ -156,6 +158,7 @@ button[kind="primary"]:hover{
   filter:brightness(1.03) !important;
 }
 .stButton>button:focus-visible,
+.stDownloadButton>button:focus-visible,
 div[data-testid="baseButton-primary"] button:focus-visible,
 div[data-testid="stFormSubmitButton"] button:focus-visible,
 button[kind="primary"]:focus-visible{
@@ -172,6 +175,7 @@ button[kind="secondary"]{
   border:1px solid rgba(59,111,242,0.2) !important;
 }
 .stButton>button:disabled,
+.stDownloadButton>button:disabled,
 div[data-testid="baseButton-primary"] button:disabled,
 div[data-testid="stFormSubmitButton"] button:disabled,
 button:disabled{
@@ -385,6 +389,84 @@ span[data-baseweb="checkbox"][aria-checked="true"] div{
   padding:0.5rem 0.8rem;
   border:1px solid var(--border);
 }
+.field-dictionary-table{
+  table-layout:fixed;
+}
+.field-dictionary-table th:first-child,
+.field-dictionary-table td:first-child{
+  width:28%;
+  white-space:normal;
+  word-break:break-word;
+}
+.field-dictionary-table th:nth-child(2),
+.field-dictionary-table td:nth-child(2){
+  width:72%;
+  white-space:normal;
+  word-break:break-word;
+  overflow-wrap:anywhere;
+  line-height:1.5;
+}
+.formula-block{
+  white-space:normal;
+  word-break:break-word;
+  overflow-wrap:anywhere;
+  line-height:1.55;
+  color:#2b3152;
+  margin:0.5rem 0 0.8rem;
+  font-size:0.95rem;
+}
+.formula-panel{
+  background:#f9fbff;
+  border-radius:var(--radius);
+  padding:1rem 1.1rem;
+  border:1px dashed var(--border);
+  color:var(--muted);
+  margin:0.8rem 0 1.2rem;
+}
+.formula-section{
+  padding:0.65rem 0;
+  border-bottom:1px solid #e7edf8;
+}
+.formula-section:last-child{
+  border-bottom:0;
+  padding-bottom:0;
+}
+.formula-heading{
+  color:var(--accent);
+  font-weight:700;
+  font-size:0.95rem;
+  margin-bottom:0.35rem;
+}
+.formula-beta-table{
+  border-collapse:collapse;
+  width:100%;
+  table-layout:fixed;
+  margin:0.5rem 0 0;
+  font-size:0.86rem;
+}
+.formula-beta-table th{
+  background:#eef4ff;
+  color:var(--accent-deep);
+  font-weight:600;
+  padding:0.45rem 0.6rem;
+  border:1px solid var(--border);
+  text-align:left;
+}
+.formula-beta-table td{
+  padding:0.45rem 0.6rem;
+  border:1px solid var(--border);
+  white-space:normal;
+  word-break:break-word;
+  overflow-wrap:anywhere;
+}
+.formula-beta-table th:nth-child(1),
+.formula-beta-table td:nth-child(1){width:12%;}
+.formula-beta-table th:nth-child(2),
+.formula-beta-table td:nth-child(2){width:48%;}
+.formula-beta-table th:nth-child(3),
+.formula-beta-table td:nth-child(3){width:22%;}
+.formula-beta-table th:nth-child(4),
+.formula-beta-table td:nth-child(4){width:18%;}
 .stMarkdown blockquote{
   border-left:3px solid var(--accent);
   padding-left:1rem;
