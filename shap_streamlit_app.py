@@ -143,7 +143,7 @@ with st.sidebar:
     )
     st.caption(f"Adstock Ridge 状态：{adstock_ready}")
 
-    st.markdown('<div class="sidebar-section-label">支持</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-section-label">SUPPORT</div>', unsafe_allow_html=True)
     support_nav_key = f"support_nav_{st.session_state.active_page in SUPPORT_PAGES}"
     st.radio(
         "支持",
